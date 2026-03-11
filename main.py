@@ -8,8 +8,8 @@ from typing import Dict
 from astrbot.api.star import Context, Star, register
 from astrbot.api.event import filter, AstrMessageEvent
 
-from game import GameManager
-from render import (
+from .game import GameManager
+from .render import (
     render_help,
     render_player_rankings,
     render_room_rankings,
@@ -17,8 +17,8 @@ from render import (
     render_status,
     render_status_compact,
 )
-from storage import JsonStorage
-from utils import (
+from .storage import JsonStorage
+from .utils import (
     smart_compose,
     MAX_LOG_LINES,
     MAX_RANK_LINES,
@@ -26,7 +26,7 @@ from utils import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.2.3")
+@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.2.4")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -135,7 +135,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             chunks = smart_compose(
-                header="",
+                header="【新的保卫萝卜游戏已开始】",
                 body=render_status_compact(session),
                 body_max_lines=20,
                 limit=1200,
@@ -242,9 +242,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 chunks = smart_compose(
-                    header="",
+                    header="【建造结果】",
                     body=msg,
-                    footer="\n" + render_status_compact(session),
+                    footer="【当前速览】\n" + render_status_compact(session),
                     body_max_lines=10,
                     limit=1200,
                 )
@@ -272,9 +272,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 chunks = smart_compose(
-                    header="",
+                    header="【升级结果】",
                     body=msg,
-                    footer="\n" + render_status_compact(session),
+                    footer="【当前速览】\n" + render_status_compact(session),
                     body_max_lines=10,
                     limit=1200,
                 )
@@ -302,9 +302,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 chunks = smart_compose(
-                    header="",
+                    header="【拆除结果】",
                     body=msg,
-                    footer="\n" + render_status_compact(session),
+                    footer="【当前速览】\n" + render_status_compact(session),
                     body_max_lines=10,
                     limit=1200,
                 )
@@ -333,9 +333,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 chunks = smart_compose(
-                    header="",
+                    header="【回合结算】",
                     body=msg,
-                    footer="\n" + render_status_compact(session),
+                    footer="【当前速览】\n" + render_status_compact(session),
                     body_max_lines=MAX_LOG_LINES,
                     limit=1200,
                 )
@@ -364,9 +364,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 chunks = smart_compose(
-                    header="",
+                    header="【波次推进】",
                     body=msg,
-                    footer="\n" + render_status_compact(session),
+                    footer="【当前速览】\n" + render_status_compact(session),
                     body_max_lines=10,
                     limit=1200,
                 )
