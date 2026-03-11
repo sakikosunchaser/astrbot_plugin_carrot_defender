@@ -1,14 +1,143 @@
-# astrbot-plugin-helloworld
+# astrbot-plugin-carrot-defender
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+基于 **AstrBot 4.x** 的 QQ 文字互动小游戏插件。  
+玩家可以在 QQ 群聊或私聊中，通过文字指令游玩一个“保卫萝卜”风格的轻量塔防小游戏。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## 特性
 
-# Supports
+- 纯文字互动，适合 QQ 聊天环境
+- 支持 AstrBot + aiocqhttp / OneBot v11
+- 群聊 / 私聊会话隔离
+- 每个会话独立一局
+- 三种基础塔：
+  - 弓箭塔
+  - 炮塔
+  - 冰塔
+- 多波次敌人
+- JSON 持久化
+- 玩家排行榜
+- 群排行榜
+- 重启后恢复对局
+- 简洁状态模式
+- 自动限制消息长度，防止刷屏
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+## 指令列表
+
+- `/萝卜开始`：开始一局新游戏
+- `/萝卜状态`：查看当前完整状态
+- `/萝卜状态简洁`：查看当前简洁状态
+- `/萝卜速览`：查看当前简洁状态
+- `/萝卜建造 弓箭 2`：在 2 号位建造弓箭塔
+- `/萝卜建造 炮塔 3`：在 3 号位建造炮塔
+- `/萝卜建造 冰塔 4`：在 4 号位建造冰塔
+- `/萝卜升级 2`：升级 2 号位防御塔
+- `/萝卜拆除 2`：拆除 2 号位防御塔
+- `/萝卜下一回合`：推进一回合
+- `/萝卜下一波`：进入下一波
+- `/萝卜记录`：查看当前会话记录
+- `/萝卜排行`：查看玩家排行榜
+- `/萝卜群排行`：查看群排行
+- `/萝卜结束`：结束当前游戏
+- `/萝卜帮助`：查看帮助
+
+## 地图规则
+
+地图为线性 5 格：
+
+```text
+[起点] -> [1] -> [2] -> [3] -> [4] -> [5] -> [🥕]
+```
+
+- 敌人从起点进入
+- 每回合前进
+- 防御塔自动攻击范围内敌人
+- 敌人抵达萝卜则扣除生命
+- 清空所有波次即通关
+
+## 简洁状态模式
+
+为了防止群聊刷屏，插件提供：
+
+- `/萝卜状态`：完整信息
+- `/萝卜状态简洁`
+- `/萝卜速览`
+
+简洁状态只展示：
+
+- 当前波次 / 回合
+- 金币 / 生命
+- 当前地图
+- 剩余敌人数
+- 最前排敌人
+- 防御塔概况
+
+## 消息长度控制
+
+插件内置消息保护机制：
+
+- 单条消息最大长度限制
+- 回合日志自动截断
+- 排行榜自动裁剪
+- 超长文本自动拆分为多条消息
+
+适合 QQ 群环境，避免一次输出过长。
+
+## 目录结构
+
+```text
+astrbot-plugin-carrot-defender/
+├─ main.py
+├─ game.py
+├─ render.py
+├─ storage.py
+├─ utils.py
+├─ README.md
+├─ metadata.yaml
+└─ data/
+   ├─ sessions.json
+   └─ leaderboard.json
+```
+
+## 持久化说明
+
+### sessions.json
+保存当前进行中的会话数据。  
+Bot 重启后会尝试恢复。
+
+### leaderboard.json
+保存玩家与群的历史战绩。
+
+## 已实现内容
+
+- 基础战斗逻辑
+- 建塔 / 升级 / 拆除
+- 多波敌人
+- Boss 波次
+- 减速 / 溅射
+- JSON 存档
+- 排行榜
+- 简洁状态
+- 消息限长
+
+## 后续可扩展
+
+- 多人协作模式
+- 管理员开局权限
+- 自动挂机模式
+- 每日签到奖励
+- 道具系统
+- 图片渲染战场
+- 难度模式
+- 更复杂地图
+
+## 兼容性说明
+
+本插件按 AstrBot 4.x Star 插件风格编写。  
+如果你的本地运行环境中以下 API 名称略有差异，可能需要少量适配：
+
+- `event.get_group_id()`
+- `event.get_sender_id()`
+- `event.plain_result(...)`
+- `PlatformAdapterType.AIOCQHTTP`
+
+通常只需要修改 `main.py` 中少量事件适配代码即可。
