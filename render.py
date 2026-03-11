@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from game import GameSession, MAP_LENGTH, TOWER_TEMPLATES
+from .game import GameSession, MAP_LENGTH, TOWER_TEMPLATES
 
 
 def render_map(game: GameSession) -> str:
