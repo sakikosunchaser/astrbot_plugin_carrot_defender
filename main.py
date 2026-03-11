@@ -26,7 +26,7 @@ from .utils import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.2.4")
+@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.2.6")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -114,6 +114,48 @@ class CarrotDefenderPlugin(Star):
 
     def _chunks(self, text: str, body_max_lines: int | None = None):
         return smart_compose(body=text, body_max_lines=body_max_lines, limit=1200)
+
+    def _parse_position(self, raw_position) -> int | None:
+        try:
+            return int(str(raw_position).strip())
+        except Exception:
+            return None
+
+    def _normalize_tower_type(self, raw_tower_type) -> str | None:
+        if raw_tower_type is None:
+            return None
+
+        text = str(raw_tower_type).strip()
+        if not text:
+            return None
+
+        mapping = {
+            "弓": "弓箭",
+            "弓箭": "弓箭",
+            "弓箭塔": "弓箭",
+            "箭塔": "弓箭",
+            "炮": "炮塔",
+            "炮塔": "炮塔",
+            "大炮": "炮塔",
+            "冰": "冰塔",
+            "冰塔": "冰塔",
+            "冰冻塔": "冰塔",
+            "减速塔": "冰塔",
+        }
+        return mapping.get(text)
+
+    def _build_usage(self) -> str:
+        return (
+            "建造命令格式：/萝卜建造 塔类型 位置\n"
+            "示例：/萝卜建造 弓箭 2\n"
+            "可用塔类型：弓 / 弓箭 / 弓箭塔 / 炮 / 炮塔 / 冰 / 冰塔"
+        )
+
+    def _upgrade_usage(self) -> str:
+        return "升级命令格式：/萝卜升级 位置\n示例：/萝卜升级 2"
+
+    def _remove_usage(self) -> str:
+        return "拆除命令格式：/萝卜拆除 位置\n示例：/萝卜拆除 2"
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
@@ -226,9 +268,19 @@ class CarrotDefenderPlugin(Star):
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜建造")
-    async def carrot_build(self, event: AstrMessageEvent, tower_type: str, position: int):
+    async def carrot_build(self, event: AstrMessageEvent, tower_type=None, position=None):
         session_id = self._get_session_id(event)
         lock = self._get_lock(session_id)
+
+        normalized_tower_type = self._normalize_tower_type(tower_type)
+        if normalized_tower_type is None:
+            yield event.plain_result(self._build_usage())
+            return
+
+        parsed_position = self._parse_position(position)
+        if parsed_position is None:
+            yield event.plain_result(self._build_usage())
+            return
 
         async with lock:
             session = self.game_manager.get_session(session_id)
@@ -236,7 +288,7 @@ class CarrotDefenderPlugin(Star):
                 yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
                 return
 
-            ok, msg = session.build_tower(tower_type, position)
+            ok, msg = session.build_tower(normalized_tower_type, parsed_position)
             self._touch_session(session_id)
             self._save_sessions()
 
@@ -256,9 +308,14 @@ class CarrotDefenderPlugin(Star):
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜升级")
-    async def carrot_upgrade(self, event: AstrMessageEvent, position: int):
+    async def carrot_upgrade(self, event: AstrMessageEvent, position=None):
         session_id = self._get_session_id(event)
         lock = self._get_lock(session_id)
+
+        parsed_position = self._parse_position(position)
+        if parsed_position is None:
+            yield event.plain_result(self._upgrade_usage())
+            return
 
         async with lock:
             session = self.game_manager.get_session(session_id)
@@ -266,7 +323,7 @@ class CarrotDefenderPlugin(Star):
                 yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
                 return
 
-            ok, msg = session.upgrade_tower(position)
+            ok, msg = session.upgrade_tower(parsed_position)
             self._touch_session(session_id)
             self._save_sessions()
 
@@ -286,9 +343,14 @@ class CarrotDefenderPlugin(Star):
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜拆除")
-    async def carrot_remove(self, event: AstrMessageEvent, position: int):
+    async def carrot_remove(self, event: AstrMessageEvent, position=None):
         session_id = self._get_session_id(event)
         lock = self._get_lock(session_id)
+
+        parsed_position = self._parse_position(position)
+        if parsed_position is None:
+            yield event.plain_result(self._remove_usage())
+            return
 
         async with lock:
             session = self.game_manager.get_session(session_id)
@@ -296,7 +358,7 @@ class CarrotDefenderPlugin(Star):
                 yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
                 return
 
-            ok, msg = session.remove_tower(position)
+            ok, msg = session.remove_tower(parsed_position)
             self._touch_session(session_id)
             self._save_sessions()
 
