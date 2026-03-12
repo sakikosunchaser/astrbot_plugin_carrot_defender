@@ -64,11 +64,11 @@ def render_towers(game: GameSession) -> str:
         tower = game.towers[key]
         if tower.kind == "heal":
             rows.append(
-                f"- ({tower.row},{tower.col}) {tower.name} Lv{tower.level} | 治疗 {tower.heal_amount} | 升级费用 {tower.upgrade_cost}"
+                f"- ({tower.row},{tower.col}) {tower.name} Lv{tower.level} | 标记 {_tower_char(tower.tower_type)} | 治疗 {tower.heal_amount} | 升级费用 {tower.upgrade_cost}"
             )
         else:
             rows.append(
-                f"- ({tower.row},{tower.col}) {tower.name} Lv{tower.level} | ATK {tower.atk} | 射程 {tower.range} | 升级费用 {tower.upgrade_cost}"
+                f"- ({tower.row},{tower.col}) {tower.name} Lv{tower.level} | 标记 {_tower_char(tower.tower_type)} | ATK {tower.atk} | 射程 {tower.range} | 升级费用 {tower.upgrade_cost}"
             )
     return "\n".join(rows)
 
@@ -77,10 +77,10 @@ def render_shop() -> str:
     lines = []
     for key, cfg in TOWER_TEMPLATES.items():
         if cfg["kind"] == "heal":
-            lines.append(f"- {key}（{cfg['name']}）| 价格 {cfg['cost']} | 治疗塔")
+            lines.append(f"- {key}（{cfg['name']}）| 标记 {_tower_char(key)} | 价格 {cfg['cost']} | 治疗塔")
         else:
             lines.append(
-                f"- {key}（{cfg['name']}）| 价格 {cfg['cost']} | 攻击 {cfg['base_atk']} | 射程 {cfg['range']}"
+                f"- {key}（{cfg['name']}）| 标记 {_tower_char(key)} | 价格 {cfg['cost']} | 攻击 {cfg['base_atk']} | 射程 {cfg['range']}"
             )
     return "\n".join(lines)
 
@@ -100,7 +100,8 @@ def render_status(game: GameSession) -> str:
         f"萝卜生命：{game.carrot_hp}/{game.max_carrot_hp}\n"
         f"累计击杀：{game.total_kills}\n"
         f"累计赏金：{game.total_gold_earned}\n"
-        f"累计治疗：{game.total_heals}\n\n"
+        f"累计治疗：{game.total_heals}\n"
+        f"可建造格：{game.get_buildable_cells_text(limit=16)}\n\n"
         f"地图：\n{render_grid_map(game)}\n\n"
         f"敌人：\n{render_enemies(game)}\n\n"
         f"防御塔：\n{render_towers(game)}\n\n"
@@ -143,7 +144,8 @@ def render_status_compact(game: GameSession) -> str:
         f"金币：{game.gold}\n"
         f"生命：{game.carrot_hp}/{game.max_carrot_hp}\n"
         f"击杀：{game.total_kills}\n"
-        f"治疗：{game.total_heals}\n\n"
+        f"治疗：{game.total_heals}\n"
+        f"可建造格：{game.get_buildable_cells_text(limit=10)}\n\n"
         f"地图：\n{render_grid_map(game)}\n\n"
         f"敌人剩余：{sum(1 for e in game.enemies if e.alive)}\n"
         f"最前敌人：{front_enemy}\n\n"
