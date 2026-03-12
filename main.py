@@ -29,7 +29,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.1")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.2")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -145,7 +145,7 @@ class CarrotDefenderPlugin(Star):
         return (
             "建造命令格式：/萝卜建造 塔类型 行 列\n"
             "示例：/萝卜建造 弓箭 2 3\n"
-            "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔\n"
+            "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗���\n"
             "注意：不能建在路径、起点、萝卜终点上"
         )
 
@@ -174,6 +174,11 @@ class CarrotDefenderPlugin(Star):
         for sec in sections:
             lines.append("")
             lines.append(f"【{sec.get('title', '')}】")
+
+            text_block = sec.get("text_block")
+            if text_block:
+                lines.append(str(text_block))
+                continue
 
             kv = sec.get("kv", [])
             if kv:
@@ -255,7 +260,7 @@ class CarrotDefenderPlugin(Star):
     async def carrot_status(self, event: AstrMessageEvent):
         session = self.game_manager.get_session(self._get_session_id(event))
         if not session:
-            yield event.plain_result("当前没��进行中的游戏，请先使用 /萝卜开始")
+            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
             return
 
         payload = build_status_payload(session, compact=False)
