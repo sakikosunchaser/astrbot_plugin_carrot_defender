@@ -22,14 +22,7 @@ class JsonStorage:
 
         if not self.leaderboard_file.exists():
             self.leaderboard_file.write_text(
-                json.dumps(
-                    {
-                        "players": {},
-                        "rooms": {},
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
+                json.dumps({"players": {}, "rooms": {}}, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
 
@@ -43,10 +36,7 @@ class JsonStorage:
             return default
 
     def _write_json(self, path: Path, data: Any):
-        path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def load_sessions(self) -> dict:
         return self._read_json(self.sessions_file, {})
@@ -74,10 +64,12 @@ class JsonStorage:
         user_id: str,
         room_id: str,
         result: str,
+        mode: str,
         wave: int,
         turns: int,
         kills: int,
         gold_earned: int,
+        heals: int,
     ):
         board = self.load_leaderboard()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -85,6 +77,7 @@ class JsonStorage:
         user_id = str(user_id or "unknown")
         room_id = str(room_id or "unknown")
         result = result if result in ("win", "lose") else "lose"
+        mode = mode if mode in ("normal", "endless") else "normal"
 
         if user_id not in board["players"]:
             board["players"][user_id] = {
@@ -92,9 +85,12 @@ class JsonStorage:
                 "wins": 0,
                 "losses": 0,
                 "best_wave": 0,
+                "best_normal_wave": 0,
+                "best_endless_wave": 0,
                 "best_turn_survived": 0,
                 "total_kills": 0,
                 "total_gold_earned": 0,
+                "total_heals": 0,
                 "last_result": "",
                 "last_play_at": "",
             }
@@ -105,10 +101,17 @@ class JsonStorage:
             player["wins"] += 1
         else:
             player["losses"] += 1
+
         player["best_wave"] = max(player.get("best_wave", 0), wave)
+        if mode == "normal":
+            player["best_normal_wave"] = max(player.get("best_normal_wave", 0), wave)
+        else:
+            player["best_endless_wave"] = max(player.get("best_endless_wave", 0), wave)
+
         player["best_turn_survived"] = max(player.get("best_turn_survived", 0), turns)
         player["total_kills"] += kills
         player["total_gold_earned"] += gold_earned
+        player["total_heals"] += heals
         player["last_result"] = result
         player["last_play_at"] = now
 
@@ -118,9 +121,12 @@ class JsonStorage:
                 "wins": 0,
                 "losses": 0,
                 "best_wave": 0,
+                "best_normal_wave": 0,
+                "best_endless_wave": 0,
                 "best_turn_survived": 0,
                 "total_kills": 0,
                 "total_gold_earned": 0,
+                "total_heals": 0,
                 "last_play_at": "",
             }
 
@@ -130,10 +136,17 @@ class JsonStorage:
             room["wins"] += 1
         else:
             room["losses"] += 1
+
         room["best_wave"] = max(room.get("best_wave", 0), wave)
+        if mode == "normal":
+            room["best_normal_wave"] = max(room.get("best_normal_wave", 0), wave)
+        else:
+            room["best_endless_wave"] = max(room.get("best_endless_wave", 0), wave)
+
         room["best_turn_survived"] = max(room.get("best_turn_survived", 0), turns)
         room["total_kills"] += kills
         room["total_gold_earned"] += gold_earned
+        room["total_heals"] += heals
         room["last_play_at"] = now
 
         self.save_leaderboard(board)
@@ -147,12 +160,14 @@ class JsonStorage:
             wins = int(stats.get("wins", 0))
             losses = int(stats.get("losses", 0))
             best_wave = int(stats.get("best_wave", 0))
+            best_normal_wave = int(stats.get("best_normal_wave", 0))
+            best_endless_wave = int(stats.get("best_endless_wave", 0))
             best_turn_survived = int(stats.get("best_turn_survived", 0))
             total_kills = int(stats.get("total_kills", 0))
             total_gold_earned = int(stats.get("total_gold_earned", 0))
+            total_heals = int(stats.get("total_heals", 0))
             last_result = stats.get("last_result", "")
             last_play_at = stats.get("last_play_at", "")
-
             win_rate = round((wins / games * 100), 2) if games > 0 else 0.0
 
             players.append(
@@ -162,9 +177,12 @@ class JsonStorage:
                     "wins": wins,
                     "losses": losses,
                     "best_wave": best_wave,
+                    "best_normal_wave": best_normal_wave,
+                    "best_endless_wave": best_endless_wave,
                     "best_turn_survived": best_turn_survived,
                     "total_kills": total_kills,
                     "total_gold_earned": total_gold_earned,
+                    "total_heals": total_heals,
                     "last_result": last_result,
                     "last_play_at": last_play_at,
                     "win_rate": win_rate,
@@ -174,13 +192,25 @@ class JsonStorage:
         players.sort(
             key=lambda x: (
                 -x["wins"],
-                -x["best_wave"],
+                -x["best_normal_wave"],
+                -x["best_endless_wave"],
                 -x["win_rate"],
+                -x["total_kills"],
+            )
+        )
+        return players
+
+    def get_endless_rankings(self) -> List[dict]:
+        rankings = self.get_player_rankings()
+        rankings.sort(
+            key=lambda x: (
+                -x["best_endless_wave"],
+                -x["best_turn_survived"],
                 -x["total_kills"],
                 -x["total_gold_earned"],
             )
         )
-        return players
+        return rankings
 
     def get_room_rankings(self) -> List[dict]:
         board = self.load_leaderboard()
@@ -191,11 +221,13 @@ class JsonStorage:
             wins = int(stats.get("wins", 0))
             losses = int(stats.get("losses", 0))
             best_wave = int(stats.get("best_wave", 0))
+            best_normal_wave = int(stats.get("best_normal_wave", 0))
+            best_endless_wave = int(stats.get("best_endless_wave", 0))
             best_turn_survived = int(stats.get("best_turn_survived", 0))
             total_kills = int(stats.get("total_kills", 0))
             total_gold_earned = int(stats.get("total_gold_earned", 0))
+            total_heals = int(stats.get("total_heals", 0))
             last_play_at = stats.get("last_play_at", "")
-
             win_rate = round((wins / games * 100), 2) if games > 0 else 0.0
 
             rooms.append(
@@ -205,9 +237,12 @@ class JsonStorage:
                     "wins": wins,
                     "losses": losses,
                     "best_wave": best_wave,
+                    "best_normal_wave": best_normal_wave,
+                    "best_endless_wave": best_endless_wave,
                     "best_turn_survived": best_turn_survived,
                     "total_kills": total_kills,
                     "total_gold_earned": total_gold_earned,
+                    "total_heals": total_heals,
                     "last_play_at": last_play_at,
                     "win_rate": win_rate,
                 }
@@ -216,10 +251,9 @@ class JsonStorage:
         rooms.sort(
             key=lambda x: (
                 -x["wins"],
-                -x["best_wave"],
-                -x["win_rate"],
+                -x["best_normal_wave"],
+                -x["best_endless_wave"],
                 -x["games"],
-                -x["total_kills"],
             )
         )
         return rooms
@@ -227,13 +261,3 @@ class JsonStorage:
     def get_player_stats(self, user_id: str) -> dict:
         board = self.load_leaderboard()
         return board.get("players", {}).get(str(user_id), {})
-
-    def get_room_stats(self, room_id: str) -> dict:
-        board = self.load_leaderboard()
-        return board.get("rooms", {}).get(str(room_id), {})
-
-    def reset_sessions(self):
-        self.save_sessions({})
-
-    def reset_leaderboard(self):
-        self.save_leaderboard({"players": {}, "rooms": {}})
