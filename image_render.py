@@ -37,7 +37,6 @@ def build_map_grid_lines(game: GameSession) -> list[str]:
     lines.append("   " + "  ".join(str(c) for c in range(GRID_COLS)))
     for r in range(GRID_ROWS):
         lines.append(f"{r}  " + "  ".join(grid[r]))
-
     lines.append("")
     lines.append("图例：S=起点 R=萝卜 *=路径 A=弓 C=炮 I=冰 H=治")
     return lines
@@ -56,10 +55,7 @@ def build_enemy_items(game: GameSession) -> list[dict]:
         sub = f"路径点 {enemy.path_index} ｜ 坐标 ({r},{c}) ｜ 护甲 {enemy.armor} ｜ 速度 {enemy.speed}"
         if enemy.slow_turns > 0:
             sub += f" ｜ 减速 {enemy.slow_turns} 回合"
-        items.append({
-            "main": f"{enemy.name} · HP {max(0, enemy.hp)}/{enemy.max_hp}",
-            "sub": sub,
-        })
+        items.append({"main": f"{enemy.name} · HP {max(0, enemy.hp)}/{enemy.max_hp}", "sub": sub})
     return items
 
 
@@ -104,23 +100,15 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
             "badge": _mode_text(game.mode),
             "stats": stats,
             "sections": [
-                {
-                    "title": "地图",
-                    "text_block": map_text,
-                },
+                {"title": "地图", "text_block": map_text},
                 {
                     "title": "战况速览",
                     "kv": [
                         {"label": "敌人剩余", "value": str(alive_count)},
-                        {
-                            "label": "最前敌人",
-                            "value": (
-                                f"{front_enemy.name} @ {game.enemy_coord(front_enemy)}"
-                                if front_enemy else "当前无敌人"
-                            ),
-                        },
+                        {"label": "最前敌人", "value": f"{front_enemy.name} @ {game.enemy_coord(front_enemy)}" if front_enemy else "当前无敌人"},
                         {"label": "累计击杀", "value": str(game.total_kills)},
                         {"label": "累计治疗", "value": str(game.total_heals)},
+                        {"label": "可建造格", "value": game.get_buildable_cells_text(limit=10)},
                     ],
                 },
                 {
@@ -142,9 +130,12 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
             {"label": "更新时间", "value": str(game.updated_at or "-")},
         ],
         "sections": [
+            {"title": "地图", "text_block": map_text},
             {
-                "title": "地图",
-                "text_block": map_text,
+                "title": "战况总览",
+                "kv": [
+                    {"label": "可建造格", "value": game.get_buildable_cells_text(limit=16)},
+                ],
             },
             {
                 "title": "敌人列表",
@@ -168,43 +159,28 @@ def build_rank_payload(title: str, rankings: list[dict], kind: str = "player") -
             items.append({
                 "no": idx,
                 "main": f"{item['user_id']}",
-                "sub": (
-                    f"胜场 {item['wins']} ｜ 局数 {item['games']} ｜ 普通最高 {item['best_normal_wave']} ｜ "
-                    f"无尽最高 {item['best_endless_wave']} ｜ 胜率 {item['win_rate']}% ｜ 击杀 {item['total_kills']}"
-                ),
+                "sub": f"胜场 {item['wins']} ｜ 局数 {item['games']} ｜ 普通最高 {item['best_normal_wave']} ｜ 无尽最高 {item['best_endless_wave']} ｜ 胜率 {item['win_rate']}% ｜ 击杀 {item['total_kills']}",
             })
     elif kind == "endless":
         for idx, item in enumerate(rankings[:10], start=1):
             items.append({
                 "no": idx,
                 "main": f"{item['user_id']}",
-                "sub": (
-                    f"无尽最高 {item['best_endless_wave']} 波 ｜ 最高生存回合 {item['best_turn_survived']} ｜ "
-                    f"击杀 {item['total_kills']} ｜ 赏金 {item['total_gold_earned']}"
-                ),
+                "sub": f"无尽最高 {item['best_endless_wave']} 波 ｜ 最高生存回合 {item['best_turn_survived']} ｜ 击杀 {item['total_kills']} ｜ 赏金 {item['total_gold_earned']}",
             })
     elif kind == "room":
         for idx, item in enumerate(rankings[:10], start=1):
             items.append({
                 "no": idx,
                 "main": f"{item['room_id']}",
-                "sub": (
-                    f"胜场 {item['wins']} ｜ 局数 {item['games']} ｜ 普通最高 {item['best_normal_wave']} ｜ "
-                    f"无尽最高 {item['best_endless_wave']}"
-                ),
+                "sub": f"胜场 {item['wins']} ｜ 局数 {item['games']} ｜ 普通最高 {item['best_normal_wave']} ｜ 无尽最高 {item['best_endless_wave']}",
             })
 
     return {
         "title": title,
         "subtitle": "排行榜前 10",
         "badge": "Ranking",
-        "sections": [
-            {
-                "title": "榜单",
-                "items": items,
-                "empty_text": "暂无记录",
-            }
-        ],
+        "sections": [{"title": "榜单", "items": items, "empty_text": "暂无记录"}],
     }
 
 
@@ -214,13 +190,7 @@ def build_player_stats_payload(user_id: str, stats: dict) -> dict:
             "title": "我的战绩",
             "subtitle": f"玩家：{user_id}",
             "badge": "Stats",
-            "sections": [
-                {
-                    "title": "个人记录",
-                    "items": [],
-                    "empty_text": "暂无记录",
-                }
-            ],
+            "sections": [{"title": "个人记录", "items": [], "empty_text": "暂无记录"}],
         }
 
     return {
