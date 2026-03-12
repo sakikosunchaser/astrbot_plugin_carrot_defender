@@ -1,330 +1,6 @@
 from __future__ import annotations
 
-from .game import GameSession, MAP_LENGTH
-
-
-CARD_TEMPLATE = r"""
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <title>{{ title }}</title>
-  <style>
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      padding: 24px;
-      width: 920px;
-      background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
-      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
-      color: #1f2937;
-    }
-
-    .panel {
-      background: #ffffff;
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: 0 12px 40px rgba(58, 93, 170, 0.12);
-      border: 1px solid rgba(125, 160, 255, 0.16);
-    }
-
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 18px;
-    }
-
-    .title-wrap h1 {
-      margin: 0;
-      font-size: 30px;
-      color: #1d4ed8;
-      line-height: 1.2;
-    }
-
-    .subtitle {
-      margin-top: 8px;
-      font-size: 15px;
-      color: #6b7280;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 8px 14px;
-      border-radius: 999px;
-      background: #dbeafe;
-      color: #1d4ed8;
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      margin-top: 14px;
-      margin-bottom: 20px;
-    }
-
-    .stat-card {
-      background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
-      border: 1px solid #dbeafe;
-      border-radius: 18px;
-      padding: 16px;
-    }
-
-    .stat-label {
-      font-size: 13px;
-      color: #6b7280;
-      margin-bottom: 8px;
-    }
-
-    .stat-value {
-      font-size: 28px;
-      font-weight: 800;
-      color: #111827;
-      line-height: 1.2;
-    }
-
-    .section {
-      margin-top: 18px;
-    }
-
-    .section-title {
-      font-size: 18px;
-      font-weight: 800;
-      color: #1e40af;
-      margin-bottom: 12px;
-    }
-
-    .map-row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .map-node {
-      min-width: 82px;
-      padding: 12px 10px;
-      text-align: center;
-      border-radius: 14px;
-      background: #f3f6ff;
-      border: 1px solid #dbeafe;
-      font-size: 14px;
-      font-weight: 700;
-      color: #334155;
-    }
-
-    .map-node.special {
-      background: #eff6ff;
-      color: #1d4ed8;
-    }
-
-    .map-arrow {
-      display: flex;
-      align-items: center;
-      color: #94a3b8;
-      font-weight: 700;
-      padding: 0 2px;
-    }
-
-    .list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .list-item {
-      padding: 14px 16px;
-      border-radius: 16px;
-      background: #f8fbff;
-      border: 1px solid #dbeafe;
-    }
-
-    .item-main {
-      font-size: 15px;
-      font-weight: 700;
-      color: #111827;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .item-sub {
-      margin-top: 6px;
-      font-size: 13px;
-      color: #6b7280;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .muted-box {
-      padding: 16px;
-      border-radius: 16px;
-      background: #f9fafb;
-      border: 1px dashed #cbd5e1;
-      color: #6b7280;
-      font-size: 14px;
-    }
-
-    .footer {
-      margin-top: 22px;
-      text-align: right;
-      font-size: 12px;
-      color: #94a3b8;
-    }
-
-    .rank-no {
-      display: inline-block;
-      min-width: 34px;
-      text-align: center;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: #dbeafe;
-      color: #1d4ed8;
-      font-weight: 800;
-      margin-right: 10px;
-    }
-
-    .two-col {
-      display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
-      gap: 18px;
-    }
-
-    .kv-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-    }
-
-    .kv {
-      padding: 14px 16px;
-      border-radius: 14px;
-      background: #f8fbff;
-      border: 1px solid #dbeafe;
-    }
-
-    .kv .k {
-      font-size: 13px;
-      color: #6b7280;
-      margin-bottom: 6px;
-    }
-
-    .kv .v {
-      font-size: 20px;
-      color: #111827;
-      font-weight: 800;
-    }
-  </style>
-</head>
-<body>
-  <div class="panel">
-    <div class="header">
-      <div class="title-wrap">
-        <h1>{{ title }}</h1>
-        {% if subtitle %}
-        <div class="subtitle">{{ subtitle }}</div>
-        {% endif %}
-      </div>
-      {% if badge %}
-      <div class="badge">{{ badge }}</div>
-      {% endif %}
-    </div>
-
-    {% if stats %}
-    <div class="stats-grid">
-      {% for s in stats %}
-      <div class="stat-card">
-        <div class="stat-label">{{ s.label }}</div>
-        <div class="stat-value">{{ s.value }}</div>
-      </div>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    {% if map_nodes %}
-    <div class="section">
-      <div class="section-title">地图</div>
-      <div class="map-row">
-        {% for node in map_nodes %}
-          <div class="map-node {% if node.special %}special{% endif %}">{{ node.text }}</div>
-          {% if not loop.last %}
-            <div class="map-arrow">→</div>
-          {% endif %}
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    {% if two_col %}
-    <div class="section">
-      <div class="two-col">
-        {% for col in two_col %}
-        <div>
-          <div class="section-title">{{ col.title }}</div>
-          {% if col.items %}
-          <div class="list">
-            {% for item in col.items %}
-            <div class="list-item">
-              <div class="item-main">{{ item.main }}</div>
-              {% if item.sub %}
-              <div class="item-sub">{{ item.sub }}</div>
-              {% endif %}
-            </div>
-            {% endfor %}
-          </div>
-          {% else %}
-          <div class="muted-box">{{ col.empty_text or '暂无内容' }}</div>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-    {% endif %}
-
-    {% if sections %}
-      {% for sec in sections %}
-      <div class="section">
-        <div class="section-title">{{ sec.title }}</div>
-        {% if sec.kv %}
-        <div class="kv-grid">
-          {% for row in sec.kv %}
-          <div class="kv">
-            <div class="k">{{ row.label }}</div>
-            <div class="v">{{ row.value }}</div>
-          </div>
-          {% endfor %}
-        </div>
-        {% elif sec.items %}
-        <div class="list">
-          {% for item in sec.items %}
-          <div class="list-item">
-            <div class="item-main">
-              {% if item.no %}<span class="rank-no">{{ item.no }}</span>{% endif %}{{ item.main }}
-            </div>
-            {% if item.sub %}
-            <div class="item-sub">{{ item.sub }}</div>
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="muted-box">{{ sec.empty_text or '暂无内容' }}</div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    {% endif %}
-
-    <div class="footer">Generated by carrot_defender · HTML Render</div>
-  </div>
-</body>
-</html>
-"""
+from .game import GameSession, CoopGameSession, MAP_LENGTH
 
 
 def _mode_text(mode: str) -> str:
@@ -567,6 +243,195 @@ def build_session_record_payload(game: GameSession) -> dict:
                     {"label": "累计治疗", "value": game.total_heals},
                     {"label": "更新时间", "value": game.updated_at or "-"},
                 ],
+            }
+        ],
+    }
+
+
+def build_coop_map_nodes(room: CoopGameSession) -> list[dict]:
+    nodes = [{"text": "起点", "special": True}]
+    for pos in range(1, MAP_LENGTH + 1):
+        tower = room.towers.get(pos)
+        if tower:
+            owner = tower.owner_user_id[-4:] if tower.owner_user_id else "未知"
+            nodes.append({
+                "text": f"{pos}号\n{_tower_short_name(tower.tower_type)}Lv{tower.level}\n{owner}",
+                "special": False,
+            })
+        else:
+            nodes.append({
+                "text": f"{pos}号\n空位",
+                "special": False,
+            })
+    nodes.append({"text": "🥕萝卜", "special": True})
+    return nodes
+
+
+def build_coop_enemy_items(room: CoopGameSession) -> list[dict]:
+    alive = [e for e in room.enemies if e.alive]
+    alive.sort(key=lambda x: (-x.pos, x.hp))
+    items = []
+    for enemy in alive:
+        sub = f"位置 {enemy.pos} ｜ 护甲 {enemy.armor} ｜ 速度 {enemy.speed}"
+        if enemy.slow_turns > 0:
+            sub += f" ｜ 减速 {enemy.slow_turns} 回合"
+        items.append({
+            "main": f"{enemy.name} · HP {max(0, enemy.hp)}/{enemy.max_hp}",
+            "sub": sub,
+        })
+    return items
+
+
+def build_coop_tower_items(room: CoopGameSession) -> list[dict]:
+    items = []
+    for pos in sorted(room.towers.keys()):
+        tower = room.towers[pos]
+        player = room.players.get(tower.owner_user_id)
+        owner_name = player.nickname if player and player.nickname else tower.owner_user_id
+        if tower.kind == "heal":
+            main = f"{pos}号位 {tower.name} Lv{tower.level}"
+            sub = f"治疗 {tower.heal_amount} ｜ 所有者 {owner_name}"
+        else:
+            main = f"{pos}号位 {tower.name} Lv{tower.level}"
+            sub = f"ATK {tower.atk} ｜ 射程 {tower.range} ｜ 所有者 {owner_name}"
+        items.append({"main": main, "sub": sub})
+    return items
+
+
+def build_coop_player_items(room: CoopGameSession) -> list[dict]:
+    items = []
+    for uid, player in room.players.items():
+        name = player.nickname or uid
+        host_mark = "（房主）" if uid == room.host_user_id else ""
+        items.append({
+            "main": f"{name}{host_mark}",
+            "sub": f"金币 {player.gold} ｜ 建造 {player.build_count} ｜ 升级 {player.upgrade_count} ｜ 击杀 {player.kills_contributed}",
+        })
+    return items
+
+
+def build_coop_room_payload(room: CoopGameSession) -> dict:
+    return {
+        "title": "合作房间",
+        "subtitle": f"状态：{room.status}",
+        "badge": "Co-op",
+        "sections": [
+            {
+                "title": "房间信息",
+                "kv": [
+                    {"label": "房主", "value": room.host_user_id or "未知"},
+                    {"label": "人数", "value": f"{len(room.players)}/8"},
+                    {"label": "状态", "value": room.status},
+                    {"label": "波次", "value": room.wave},
+                ],
+            },
+            {
+                "title": "成员列表",
+                "items": build_coop_player_items(room),
+                "empty_text": "暂无成员",
+            },
+        ],
+    }
+
+
+def build_coop_status_payload(room: CoopGameSession, compact: bool = False) -> dict:
+    alive_count = sum(1 for e in room.enemies if e.alive)
+    front_enemy = None
+    alive = [e for e in room.enemies if e.alive]
+    if alive:
+        alive.sort(key=lambda x: (-x.pos, x.hp))
+        front_enemy = alive[0]
+
+    stats = [
+        {"label": "模式", "value": "合作模式"},
+        {"label": "波次 / 回合", "value": f"{room.wave} / {room.turn}"},
+        {"label": "生命", "value": f"{room.carrot_hp}/{room.max_carrot_hp}"},
+        {"label": "人数", "value": f"{len(room.players)}/8"},
+    ]
+
+    if compact:
+        return {
+            "title": "合作保卫萝卜 · 速览",
+            "subtitle": f"状态：{room.status}",
+            "badge": "Co-op",
+            "stats": stats,
+            "map_nodes": build_coop_map_nodes(room),
+            "sections": [
+                {
+                    "title": "战况速览",
+                    "kv": [
+                        {"label": "敌人剩余", "value": str(alive_count)},
+                        {
+                            "label": "最前敌人",
+                            "value": f"{front_enemy.name} @ {front_enemy.pos}" if front_enemy else "当前无敌人",
+                        },
+                        {"label": "累计击杀", "value": str(room.total_kills)},
+                        {"label": "累计治疗", "value": str(room.total_heals)},
+                    ],
+                },
+                {
+                    "title": "玩家金币",
+                    "items": build_coop_player_items(room),
+                    "empty_text": "暂无玩家",
+                },
+            ],
+        }
+
+    return {
+        "title": "合作保卫萝卜 · 状态面板",
+        "subtitle": f"状态：{room.status} ｜ 累计击杀 {room.total_kills} ｜ 累计治疗 {room.total_heals}",
+        "badge": "Co-op",
+        "stats": stats + [
+            {"label": "总赏金", "value": str(room.total_gold_earned)},
+            {"label": "存活敌人", "value": str(alive_count)},
+            {"label": "房主", "value": room.host_user_id or "未知"},
+            {"label": "更新时间", "value": room.updated_at or "-"},
+        ],
+        "map_nodes": build_coop_map_nodes(room),
+        "sections": [
+            {
+                "title": "玩家金币",
+                "items": build_coop_player_items(room),
+                "empty_text": "暂无玩家",
+            },
+            {
+                "title": "敌人列表",
+                "items": build_coop_enemy_items(room),
+                "empty_text": "当前没有敌人",
+            },
+            {
+                "title": "防御塔",
+                "items": build_coop_tower_items(room),
+                "empty_text": "当前没有防御塔",
+            },
+        ],
+    }
+
+
+def build_coop_contribution_payload(room: CoopGameSession) -> dict:
+    rows = room.get_contribution_rankings()
+    items = []
+    for idx, row in enumerate(rows, start=1):
+        name = row["nickname"] or row["user_id"]
+        items.append({
+            "no": idx,
+            "main": name,
+            "sub": (
+                f"击杀 {row['kills_contributed']} ｜ 治疗 {row['heal_contributed']} ｜ "
+                f"建造 {row['build_count']} ｜ 升级 {row['upgrade_count']} ｜ "
+                f"花费 {row['gold_spent']} ｜ 赏金 {row['gold_earned']} ｜ 当前金币 {row['gold']}"
+            ),
+        })
+
+    return {
+        "title": "合作贡献榜",
+        "subtitle": f"当前人数：{len(room.players)}",
+        "badge": "Co-op",
+        "sections": [
+            {
+                "title": "贡献排行",
+                "items": items,
+                "empty_text": "暂无贡献数据",
             }
         ],
     }
