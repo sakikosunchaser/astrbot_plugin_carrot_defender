@@ -34,6 +34,14 @@ TOWER_TEMPLATES = {
         "upgrade_cost": 45,
         "kind": "slow",
     },
+    "治疗塔": {
+        "name": "治疗塔",
+        "cost": 90,
+        "base_atk": 0,
+        "range": 0,
+        "upgrade_cost": 55,
+        "kind": "heal",
+    },
 }
 
 ENEMY_ARCHETYPES = [
@@ -100,6 +108,12 @@ class Tower:
     def kind(self) -> str:
         return self.cfg["kind"]
 
+    @property
+    def heal_amount(self) -> int:
+        if self.kind != "heal":
+            return 0
+        return 1 + (self.level - 1) // 2
+
     def to_dict(self) -> dict:
         return {
             "tower_type": self.tower_type,
@@ -115,6 +129,7 @@ class Tower:
 @dataclass
 class GameSession:
     session_id: str
+    mode: str = "normal"  # normal / endless
     wave: int = 0
     turn: int = 0
     gold: int = 200
@@ -127,56 +142,105 @@ class GameSession:
     updated_at: str = ""
     total_kills: int = 0
     total_gold_earned: int = 0
+    total_heals: int = 0
 
     def is_over(self) -> bool:
         return self.status in ("win", "lose")
 
-    def start(self, created_by: str = "") -> str:
+    def start(self, created_by: str = "", mode: str = "normal") -> str:
+        self.mode = mode
         self.wave = 1
         self.turn = 0
         self.gold = 200
         self.carrot_hp = 10
+        self.max_carrot_hp = 10
         self.towers = {}
         self.enemies = []
         self.status = "running"
         self.created_by = created_by
         self.total_kills = 0
         self.total_gold_earned = 0
+        self.total_heals = 0
         self.spawn_wave(self.wave)
-        return "游戏开始，第 1 波敌人已出现！"
+        return f"游戏开始，模式：{self.mode}，第 1 波敌人已出现！"
 
     def spawn_wave(self, wave: int) -> None:
         self.enemies = []
-        enemy_count = 2 + wave
-        for i in range(enemy_count):
-            if wave == MAX_WAVE and i == enemy_count - 1:
-                hp = 140 + wave * 25
+
+        if self.mode == "normal":
+            enemy_count = 2 + wave
+            for i in range(enemy_count):
+                if wave == MAX_WAVE and i == enemy_count - 1:
+                    hp = 140 + wave * 25
+                    self.enemies.append(
+                        Enemy(
+                            uid=f"boss-{wave}-{i}",
+                            name="Boss兔将军",
+                            hp=hp,
+                            max_hp=hp,
+                            speed=1,
+                            reward=120,
+                            armor=8,
+                            pos=0,
+                        )
+                    )
+                    continue
+
+                base = random.choice(ENEMY_ARCHETYPES)
+                hp = base["hp"] + wave * 12
+                reward = base["reward"] + wave * 3
                 self.enemies.append(
                     Enemy(
-                        uid=f"boss-{wave}-{i}",
-                        name="Boss兔将军",
+                        uid=f"e-{wave}-{i}",
+                        name=base["name"],
                         hp=hp,
                         max_hp=hp,
-                        speed=1,
-                        reward=120,
-                        armor=8,
+                        speed=base["speed"],
+                        reward=reward,
+                        armor=base["armor"] + (1 if wave >= 3 else 0),
+                        pos=0,
+                    )
+                )
+            return
+
+        # endless
+        enemy_count = min(12, 2 + wave // 2)
+        for i in range(enemy_count):
+            is_boss = (wave % 10 == 0 and i == enemy_count - 1)
+            if is_boss:
+                hp = 180 + wave * 35
+                armor = 8 + wave // 8
+                reward = 150 + wave * 6
+                self.enemies.append(
+                    Enemy(
+                        uid=f"endless-boss-{wave}-{i}",
+                        name=f"无尽Boss-{wave}",
+                        hp=hp,
+                        max_hp=hp,
+                        speed=1 if wave < 20 else 2,
+                        reward=reward,
+                        armor=armor,
                         pos=0,
                     )
                 )
                 continue
 
             base = random.choice(ENEMY_ARCHETYPES)
-            hp = base["hp"] + wave * 12
-            reward = base["reward"] + wave * 3
+            hp = base["hp"] + wave * 15
+            armor = base["armor"] + wave // 4
+            speed = base["speed"]
+            if wave >= 15 and random.random() < 0.2:
+                speed += 1
+            reward = base["reward"] + wave * 4
             self.enemies.append(
                 Enemy(
-                    uid=f"e-{wave}-{i}",
+                    uid=f"endless-e-{wave}-{i}",
                     name=base["name"],
                     hp=hp,
                     max_hp=hp,
-                    speed=base["speed"],
+                    speed=min(3, speed),
                     reward=reward,
-                    armor=base["armor"] + (1 if wave >= 3 else 0),
+                    armor=armor,
                     pos=0,
                 )
             )
@@ -186,7 +250,7 @@ class GameSession:
             return False, "当前没有进行中的游戏，请先使用 /萝卜开始"
 
         if tower_type not in TOWER_TEMPLATES:
-            return False, "未知塔类型，可用：弓箭 / 炮塔 / 冰塔"
+            return False, "未知塔类型，可用：弓箭 / 炮塔 / 冰塔 / 治疗塔"
 
         if position < 1 or position > MAP_LENGTH:
             return False, f"位置必须在 1 ~ {MAP_LENGTH} 之间"
@@ -241,7 +305,7 @@ class GameSession:
         if any(e.alive for e in self.enemies):
             return False, "当前还有敌人存活，不能直接进入下一波"
 
-        if self.wave >= MAX_WAVE:
+        if self.mode == "normal" and self.wave >= MAX_WAVE:
             self.status = "win"
             return True, "所有波次已完成，恭喜你成功保卫了萝卜！"
 
@@ -255,13 +319,13 @@ class GameSession:
             return False, "当前没有进行中的游戏"
 
         if not any(e.alive for e in self.enemies):
-            if self.wave >= MAX_WAVE:
+            if self.mode == "normal" and self.wave >= MAX_WAVE:
                 self.status = "win"
                 return True, "所有波次都已清空，恭喜通关！"
             return False, "当前没有敌人，请使用 /萝卜下一波"
 
         self.turn += 1
-        logs: List[str] = [f"第 {self.wave} 波 - 第 {self.turn} 回合"]
+        logs: List[str] = [f"模式：{self.mode} | 第 {self.wave} 波 - 第 {self.turn} 回合"]
 
         attack_logs = self._tower_attack_phase()
         logs.extend(attack_logs)
@@ -285,6 +349,9 @@ class GameSession:
             move_logs = self._enemy_move_phase()
             logs.extend(move_logs)
 
+        heal_logs = self._heal_phase()
+        logs.extend(heal_logs)
+
         for enemy in self.enemies:
             if enemy.alive and enemy.slow_turns > 0:
                 enemy.slow_turns -= 1
@@ -293,7 +360,7 @@ class GameSession:
             self.status = "lose"
             logs.append("萝卜生命归零，游戏失败！")
         elif not any(e.alive for e in self.enemies):
-            if self.wave >= MAX_WAVE:
+            if self.mode == "normal" and self.wave >= MAX_WAVE:
                 self.status = "win"
                 logs.append("所有波次已清空，恭喜通关！")
             else:
@@ -309,12 +376,17 @@ class GameSession:
             logs.append("本回合没有防御塔出手")
             return logs
 
-        if not alive_enemies:
-            logs.append("场上没有敌人")
-            return logs
-
         for pos in sorted(self.towers.keys()):
             tower = self.towers[pos]
+
+            if tower.kind == "heal":
+                logs.append(f"{tower.name}({pos},Lv{tower.level}) 待机治疗")
+                continue
+
+            if not alive_enemies:
+                logs.append(f"{tower.name}({pos}) 未找到目标")
+                continue
+
             targets = [
                 e for e in self.enemies
                 if e.alive and abs(e.pos - tower.position) <= tower.range
@@ -328,9 +400,7 @@ class GameSession:
             main_target = targets[0]
             dmg = max(1, tower.atk - main_target.armor)
             main_target.hp -= dmg
-            logs.append(
-                f"{tower.name}({pos},Lv{tower.level}) 攻击 {main_target.name}，造成 {dmg} 伤害"
-            )
+            logs.append(f"{tower.name}({pos},Lv{tower.level}) 攻击 {main_target.name}，造成 {dmg} 伤害")
 
             if tower.kind == "splash":
                 for extra in targets[1:3]:
@@ -364,9 +434,36 @@ class GameSession:
 
         return logs
 
+    def _heal_phase(self) -> List[str]:
+        logs: List[str] = []
+
+        total_heal = 0
+        for pos in sorted(self.towers.keys()):
+            tower = self.towers[pos]
+            if tower.kind != "heal":
+                continue
+            total_heal += tower.heal_amount
+
+        if total_heal <= 0:
+            return logs
+
+        if self.carrot_hp >= self.max_carrot_hp:
+            logs.append("治疗塔尝试治疗，但萝卜生命已满")
+            return logs
+
+        before = self.carrot_hp
+        self.carrot_hp = min(self.max_carrot_hp, self.carrot_hp + total_heal)
+        actual = self.carrot_hp - before
+        if actual > 0:
+            self.total_heals += actual
+            logs.append(f"治疗塔共为萝卜恢复了 {actual} 点生命")
+
+        return logs
+
     def to_dict(self) -> dict:
         return {
             "session_id": self.session_id,
+            "mode": self.mode,
             "wave": self.wave,
             "turn": self.turn,
             "gold": self.gold,
@@ -379,12 +476,14 @@ class GameSession:
             "updated_at": self.updated_at,
             "total_kills": self.total_kills,
             "total_gold_earned": self.total_gold_earned,
+            "total_heals": self.total_heals,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "GameSession":
         session = cls(
             session_id=data["session_id"],
+            mode=data.get("mode", "normal"),
             wave=data.get("wave", 0),
             turn=data.get("turn", 0),
             gold=data.get("gold", 200),
@@ -395,11 +494,9 @@ class GameSession:
             updated_at=data.get("updated_at", ""),
             total_kills=data.get("total_kills", 0),
             total_gold_earned=data.get("total_gold_earned", 0),
+            total_heals=data.get("total_heals", 0),
         )
-        session.towers = {
-            int(k): Tower.from_dict(v)
-            for k, v in data.get("towers", {}).items()
-        }
+        session.towers = {int(k): Tower.from_dict(v) for k, v in data.get("towers", {}).items()}
         session.enemies = [Enemy.from_dict(e) for e in data.get("enemies", [])]
         return session
 
@@ -411,10 +508,10 @@ class GameManager:
     def get_session(self, session_id: str) -> Optional[GameSession]:
         return self.sessions.get(session_id)
 
-    def create_or_reset_session(self, session_id: str, created_by: str = "") -> GameSession:
+    def create_or_reset_session(self, session_id: str, created_by: str = "", mode: str = "normal") -> GameSession:
         session = GameSession(session_id=session_id)
         self.sessions[session_id] = session
-        session.start(created_by=created_by)
+        session.start(created_by=created_by, mode=mode)
         return session
 
     def end_session(self, session_id: str) -> Optional[GameSession]:
