@@ -5,11 +5,11 @@ from .game import GameSession, GRID_ROWS, GRID_COLS, TOWER_TEMPLATES
 
 def _tower_char(tower_type: str) -> str:
     return {
-        "弓箭": "弓",
-        "炮塔": "炮",
-        "冰塔": "冰",
-        "治疗塔": "奶",
-    }.get(tower_type, "塔")
+        "弓箭": "A",
+        "炮塔": "C",
+        "冰塔": "I",
+        "治疗塔": "H",
+    }.get(tower_type, "T")
 
 
 def render_grid_map(game: GameSession) -> str:
@@ -18,22 +18,24 @@ def render_grid_map(game: GameSession) -> str:
 
     grid = [["·" for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
 
-    for idx, (r, c) in enumerate(game.map_state.path):
-        grid[r][c] = "路"
+    for r, c in game.map_state.path:
+        grid[r][c] = "*"
 
     sr, sc = game.map_state.start()
     er, ec = game.map_state.end()
-    grid[sr][sc] = "起"
-    grid[er][ec] = "🥕"
+    grid[sr][sc] = "S"
+    grid[er][ec] = "R"
 
     for tower in game.towers.values():
         grid[tower.row][tower.col] = _tower_char(tower.tower_type)
 
     lines = []
-    header = "   " + " ".join(str(c) for c in range(GRID_COLS))
-    lines.append(header)
+    lines.append("   " + "  ".join(str(c) for c in range(GRID_COLS)))
     for r in range(GRID_ROWS):
-        lines.append(f"{r}  " + " ".join(grid[r]))
+        lines.append(f"{r}  " + "  ".join(grid[r]))
+
+    lines.append("")
+    lines.append("图例：S=起点 R=萝卜 *=路径 A=弓 C=炮 I=冰 H=治")
     return "\n".join(lines)
 
 
