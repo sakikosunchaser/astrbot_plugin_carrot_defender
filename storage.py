@@ -11,6 +11,7 @@ class JsonStorage:
         self.base_dir = Path(base_dir)
         self.data_dir = self.base_dir / "data"
         self.sessions_file = self.data_dir / "sessions.json"
+        self.coop_sessions_file = self.data_dir / "coop_sessions.json"
         self.leaderboard_file = self.data_dir / "leaderboard.json"
         self._ensure_files()
 
@@ -19,6 +20,9 @@ class JsonStorage:
 
         if not self.sessions_file.exists():
             self.sessions_file.write_text("{}", encoding="utf-8")
+
+        if not self.coop_sessions_file.exists():
+            self.coop_sessions_file.write_text("{}", encoding="utf-8")
 
         if not self.leaderboard_file.exists():
             self.leaderboard_file.write_text(
@@ -43,6 +47,12 @@ class JsonStorage:
 
     def save_sessions(self, sessions: dict):
         self._write_json(self.sessions_file, sessions)
+
+    def load_coop_sessions(self) -> dict:
+        return self._read_json(self.coop_sessions_file, {})
+
+    def save_coop_sessions(self, sessions: dict):
+        self._write_json(self.coop_sessions_file, sessions)
 
     def load_leaderboard(self) -> dict:
         board = self._read_json(self.leaderboard_file, {"players": {}, "rooms": {}})
