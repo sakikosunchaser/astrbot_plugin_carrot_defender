@@ -8,7 +8,7 @@ from typing import Dict
 from astrbot.api.star import Context, Star, register
 from astrbot.api.event import filter, AstrMessageEvent
 
-from .game import GameManager, CoopGameManager
+from .game import GameManager, CoopGameManager, PvpGameManager
 from .render import (
     render_help,
     render_player_rankings,
@@ -22,6 +22,10 @@ from .render import (
     render_coop_status,
     render_coop_status_compact,
     render_coop_contributions,
+    render_pvp_room,
+    render_pvp_status,
+    render_pvp_player_state,
+    render_pvp_rankings,
 )
 from .storage import JsonStorage
 from .utils import smart_compose, MAX_RANK_LINES, MAX_STATUS_LINES
@@ -33,15 +37,19 @@ from .image_render import (
     build_coop_room_payload,
     build_coop_status_payload,
     build_coop_contribution_payload,
+    build_pvp_room_payload,
+    build_pvp_status_payload,
+    build_pvp_my_state_payload,
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.7.0")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.8.0")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.game_manager = GameManager()
         self.coop_game_manager = CoopGameManager()
+        self.pvp_game_manager = PvpGameManager()
         self.session_locks: Dict[str, asyncio.Lock] = {}
 
         base_dir = Path(__file__).resolve().parent
@@ -49,6 +57,7 @@ class CarrotDefenderPlugin(Star):
 
         self.game_manager.load_sessions(self.storage.load_sessions())
         self.coop_game_manager.load_sessions(self.storage.load_coop_sessions())
+        self.pvp_game_manager.load_sessions(self.storage.load_pvp_sessions())
 
         self.render_mode = "image"
 
@@ -104,6 +113,7 @@ class CarrotDefenderPlugin(Star):
     def _save_sessions(self):
         self.storage.save_sessions(self.game_manager.dump_sessions())
         self.storage.save_coop_sessions(self.coop_game_manager.dump_sessions())
+        self.storage.save_pvp_sessions(self.pvp_game_manager.dump_sessions())
 
     def _touch_single_session(self, session_id: str):
         session = self.game_manager.get_session(session_id)
@@ -112,6 +122,11 @@ class CarrotDefenderPlugin(Star):
 
     def _touch_coop_session(self, session_id: str):
         room = self.coop_game_manager.get_session(session_id)
+        if room:
+            room.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def _touch_pvp_session(self, session_id: str):
+        room = self.pvp_game_manager.get_session(session_id)
         if room:
             room.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -182,6 +197,13 @@ class CarrotDefenderPlugin(Star):
             "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔"
         )
 
+    def _pvp_build_usage(self) -> str:
+        return (
+            "PVP 建造命令格式：/萝卜PVP建造 塔类型 行 列\n"
+            "示例：/萝卜PVP建造 弓箭 2 3\n"
+            "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔"
+        )
+
     def _payload_to_plain_text(self, payload: dict) -> str:
         lines = []
 
@@ -199,14 +221,14 @@ class CarrotDefenderPlugin(Star):
         stats = payload.get("stats", [])
         if stats:
             lines.append("")
-            lines.append("【概览】")
+            lines.append("")
             for item in stats:
                 lines.append(f"{item.get('label', '')}：{item.get('value', '')}")
 
         sections = payload.get("sections", [])
         for sec in sections:
             lines.append("")
-            lines.append(f"【{sec.get('title', '')}】")
+            lines.append(f"")
 
             text_block = sec.get("text_block")
             if text_block:
@@ -260,7 +282,7 @@ class CarrotDefenderPlugin(Star):
     @filter.command("萝卜帮助")
     async def carrot_help(self, event: AstrMessageEvent):
         help_text = render_help() + f"\n\n当前渲染模式：{self.render_mode}"
-        async for result in self._send_text(event, help_text, body_max_lines=40):
+        async for result in self._send_text(event, help_text, body_max_lines=50):
             yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -368,7 +390,6 @@ class CarrotDefenderPlugin(Star):
         if self.render_mode == "image":
             plain_text = self._payload_to_plain_text(payload)
             plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
-
             ok, result = await self._try_text_to_image(plain_text)
             if ok:
                 yield event.image_result(result)
@@ -386,7 +407,7 @@ class CarrotDefenderPlugin(Star):
     async def carrot_status_text(self, event: AstrMessageEvent):
         session = self.game_manager.get_session(self._get_session_id(event))
         if not session:
-            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝��开始")
+            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
             return
 
         async for result in self._send_text(event, render_status(session), body_max_lines=MAX_STATUS_LINES):
@@ -397,7 +418,7 @@ class CarrotDefenderPlugin(Star):
     async def carrot_status_quick_text(self, event: AstrMessageEvent):
         session = self.game_manager.get_session(self._get_session_id(event))
         if not session:
-            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
+            yield event.plain_result("当前没有进行中的��戏，请先使用 /萝卜开始")
             return
 
         async for result in self._send_text(event, render_status_compact(session), body_max_lines=30):
@@ -428,7 +449,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"【建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜状态文本"
@@ -465,7 +486,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"【升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜状态文本"
@@ -502,7 +523,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"【拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜状态文本"
@@ -535,7 +556,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=False)
-                text = f"【回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
@@ -567,7 +588,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=False)
-                text = f"【波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
@@ -870,7 +891,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"【合作建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -903,7 +924,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"【合作升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -936,7 +957,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"【合作拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -965,7 +986,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=False)
-                text = f"【合作回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
@@ -993,7 +1014,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"【合作波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -1044,3 +1065,409 @@ class CarrotDefenderPlugin(Star):
             self.coop_game_manager.remove_room(sid)
             self._save_sessions()
             yield event.plain_result("合作房间已结束并解散")
+
+    # -------- PVP --------
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP创建")
+    async def carrot_pvp_create(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        name = self._get_user_name(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            ok, msg, room = self.pvp_game_manager.create_room(sid, host_user_id=uid, nickname=name)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if not ok or room is None:
+                yield event.plain_result(msg)
+                return
+            payload = build_pvp_room_payload(room)
+            async for result in self._send_panel(event, payload, body_max_lines=25):
+                yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP加入")
+    async def carrot_pvp_join(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        name = self._get_user_name(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.add_player(uid, nickname=name)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                payload = build_pvp_room_payload(room)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP退出")
+    async def carrot_pvp_leave(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间")
+                return
+            ok, msg = room.remove_player(uid)
+            if ok and not room.players:
+                self.pvp_game_manager.remove_room(sid)
+                self._save_sessions()
+                yield event.plain_result("你已退出 PVP 房间，房间已因无人而解散")
+                return
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                payload = build_pvp_room_payload(room)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP房���")
+    async def carrot_pvp_room(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        payload = build_pvp_room_payload(room)
+        async for result in self._send_panel(event, payload, body_max_lines=25):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP房间文本")
+    async def carrot_pvp_room_text(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        async for result in self._send_text(event, render_pvp_room(room), body_max_lines=25):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP开始")
+    async def carrot_pvp_start(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.start(uid)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                payload = build_pvp_status_payload(room)
+                if self.render_mode == "image":
+                    plain_text = self._payload_to_plain_text(payload)
+                    plain_text += "\n\n提示：查看个人完整地图请使用：/萝卜PVP我的状态文本"
+                    ok_img, result = await self._try_text_to_image(plain_text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                    async for result in self._send_text(event, plain_text, body_max_lines=35):
+                        yield result
+                    return
+                async for result in self._send_panel(event, payload, body_max_lines=35):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP状态")
+    async def carrot_pvp_status(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        payload = build_pvp_status_payload(room)
+        async for result in self._send_panel(event, payload, body_max_lines=35):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP状态文本")
+    async def carrot_pvp_status_text(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        async for result in self._send_text(event, render_pvp_status(room), body_max_lines=35):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP速览")
+    async def carrot_pvp_quick(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        uid = self._get_user_id(event)
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        player = room.get_player_state(uid)
+        if not player:
+            yield event.plain_result("你不在当前 PVP 房间中")
+            return
+
+        payload = build_pvp_my_state_payload(room, player, compact=True)
+        if self.render_mode == "image":
+            plain_text = self._payload_to_plain_text(payload)
+            plain_text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
+            ok_img, result = await self._try_text_to_image(plain_text)
+            if ok_img:
+                yield event.image_result(result)
+                return
+            async for result in self._send_text(event, plain_text, body_max_lines=35):
+                yield result
+            return
+
+        async for result in self._send_panel(event, payload, body_max_lines=35):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP我的状态")
+    async def carrot_pvp_my_status(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        uid = self._get_user_id(event)
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        player = room.get_player_state(uid)
+        if not player:
+            yield event.plain_result("你不在当前 PVP 房间中")
+            return
+
+        payload = build_pvp_my_state_payload(room, player, compact=False)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP我的状态文本")
+    async def carrot_pvp_my_status_text(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        uid = self._get_user_id(event)
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        player = room.get_player_state(uid)
+        if not player:
+            yield event.plain_result("你不在当前 PVP 房间中")
+            return
+
+        async for result in self._send_text(event, render_pvp_player_state(room, player), body_max_lines=MAX_STATUS_LINES):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP建造")
+    async def carrot_pvp_build(self, event: AstrMessageEvent, tower_type=None, row=None, col=None):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+
+        tower_type = self._normalize_tower_type(tower_type)
+        row, col = self._parse_coord(row, col)
+        if tower_type is None or row is None or col is None:
+            yield event.plain_result(self._pvp_build_usage())
+            return
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.build_tower(uid, tower_type, row, col)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                player = room.get_player_state(uid)
+                payload = build_pvp_my_state_payload(room, player, compact=True)
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                if self.render_mode == "image":
+                    text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=35):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP升级")
+    async def carrot_pvp_upgrade(self, event: AstrMessageEvent, row=None, col=None):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+        row, col = self._parse_coord(row, col)
+        if row is None or col is None:
+            yield event.plain_result("PVP 升级命令格式：/萝卜PVP升级 行 列\n示例：/萝卜PVP升级 2 3")
+            return
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.upgrade_tower(uid, row, col)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                player = room.get_player_state(uid)
+                payload = build_pvp_my_state_payload(room, player, compact=True)
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                if self.render_mode == "image":
+                    text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=35):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP拆除")
+    async def carrot_pvp_remove(self, event: AstrMessageEvent, row=None, col=None):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+        row, col = self._parse_coord(row, col)
+        if row is None or col is None:
+            yield event.plain_result("PVP 拆除命令格式：/萝卜PVP拆除 行 列\n示例：/萝卜PVP拆除 2 3")
+            return
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.remove_tower(uid, row, col)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                player = room.get_player_state(uid)
+                payload = build_pvp_my_state_payload(room, player, compact=True)
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                if self.render_mode == "image":
+                    text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=35):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP下一回合")
+    async def carrot_pvp_next_turn(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.step_turn(uid)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                payload = build_pvp_status_payload(room)
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=MAX_STATUS_LINES):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP下一波")
+    async def carrot_pvp_next_wave(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+                return
+            ok, msg = room.next_wave(uid)
+            self._touch_pvp_session(sid)
+            self._save_sessions()
+            if ok:
+                payload = build_pvp_status_payload(room)
+                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=MAX_STATUS_LINES):
+                    yield result
+            else:
+                yield event.plain_result(msg)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP排行")
+    async def carrot_pvp_rank(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        payload = build_pvp_status_payload(room)
+        async for result in self._send_panel(event, payload, body_max_lines=35):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP排行文本")
+    async def carrot_pvp_rank_text(self, event: AstrMessageEvent):
+        room = self.pvp_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有 PVP 房间，请先使用 /萝卜PVP创建")
+            return
+        async for result in self._send_text(event, render_pvp_rankings(room), body_max_lines=35):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜PVP结束")
+    async def carrot_pvp_end(self, event: AstrMessageEvent):
+        sid = self._get_session_id(event)
+        uid = self._get_user_id(event)
+        lock = self._get_lock(sid)
+
+        async with lock:
+            room = self.pvp_game_manager.get_session(sid)
+            if not room:
+                yield event.plain_result("当前没有 PVP 房间")
+                return
+            if uid != room.host_user_id:
+                yield event.plain_result("只有房主可以结束 PVP 房间")
+                return
+            self.pvp_game_manager.remove_room(sid)
+            self._save_sessions()
+            yield event.plain_result("PVP 房间已结束并解散")
