@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from .game import GameSession, CoopGameSession, GRID_ROWS, GRID_COLS, TOWER_TEMPLATES
+from .game import (
+    GameSession,
+    CoopGameSession,
+    PvpGameSession,
+    PvpPlayerState,
+    GRID_ROWS,
+    GRID_COLS,
+    TOWER_TEMPLATES,
+)
 
 
 def _tower_char(tower_type: str) -> str:
@@ -111,6 +119,38 @@ def render_coop_towers(room: CoopGameSession) -> str:
     return "\n".join(rows)
 
 
+def render_pvp_player_enemies(room: PvpGameSession, player: PvpPlayerState) -> str:
+    alive = [e for e in player.enemies if e.alive]
+    if not alive:
+        return "无"
+    alive.sort(key=lambda x: (-x.path_index, x.hp))
+    lines = []
+    for enemy in alive:
+        r, c = room.enemy_coord(enemy)
+        slow_text = f"，减速{enemy.slow_turns}回合" if enemy.slow_turns > 0 else ""
+        lines.append(
+            f"- {enemy.name} | HP {max(0, enemy.hp)}/{enemy.max_hp} | 路径点 {enemy.path_index} | 坐标 ({r},{c}) | 护甲 {enemy.armor}{slow_text}"
+        )
+    return "\n".join(lines)
+
+
+def render_pvp_player_towers(player: PvpPlayerState) -> str:
+    if not player.towers:
+        return "无"
+    rows = []
+    for key in sorted(player.towers.keys()):
+        tower = player.towers[key]
+        if tower.kind == "heal":
+            rows.append(
+                f"- ({tower.row},{tower.col}) {tower.name} Lv{tower.level} | 标记 {_tower_char(tower.tower_type)} | 治疗 {tower.heal_amount} | 升级费用 {tower.upgrade_cost}"
+            )
+        else:
+            rows.append(
+                f"- ({tower.row},{tower.col}) {tower.name} Lv{tower.level} | 标记 {_tower_char(tower.tower_type)} | ATK {tower.atk} | 射程 {tower.range} | 升级费用 {tower.upgrade_cost}"
+            )
+    return "\n".join(rows)
+
+
 def render_shop() -> str:
     lines = []
     for key, cfg in TOWER_TEMPLATES.items():
@@ -198,6 +238,8 @@ def render_help() -> str:
         "/萝卜开始\n/萝卜无尽\n/萝卜状态\n/萝卜速览\n/萝卜建造 弓箭 2 3\n/萝卜升级 2 3\n/萝卜拆除 2 3\n/萝卜下一回合\n/萝卜下一波\n/萝卜记录\n/萝卜排行\n/萝卜无尽排行\n/萝卜群排行\n/萝卜我的战绩\n/萝卜结束\n\n"
         "—— 合作模式 ——\n"
         "/萝卜合作创建\n/萝卜合作加入\n/萝卜合作退出\n/萝卜合作房间\n/萝卜合作开始\n/萝卜合作结束\n/萝卜合作状态\n/萝卜合作速览\n/萝卜合作建造 弓箭 2 3\n/萝卜合作升级 2 3\n/萝卜合作拆除 2 3\n/萝卜合作下一回合\n/萝卜合作下一波\n/萝卜合作贡献\n\n"
+        "—— PVP 模式 ——\n"
+        "/萝卜PVP创建\n/萝卜PVP加入\n/萝卜PVP退出\n/萝卜PVP房间\n/萝卜PVP开始\n/萝卜PVP结束\n/萝卜PVP状态\n/萝卜PVP速览\n/萝卜PVP我的状态\n/萝卜PVP建造 弓箭 2 3\n/萝卜PVP升级 2 3\n/萝卜PVP拆除 2 3\n/萝卜PVP下一回合\n/萝卜PVP下一波\n/萝卜PVP排行\n\n"
         "—— 渲染控制 ——\n"
         "/萝卜渲染 图片\n/萝卜渲染 文本"
     )
@@ -269,7 +311,7 @@ def render_player_stats(user_id: str, stats: dict) -> str:
     return (
         "【我的战绩】\n"
         f"玩家：{user_id}\n"
-        f"总局数：{stats.get('games', 0)}\n"
+        f"总局��：{stats.get('games', 0)}\n"
         f"胜场：{stats.get('wins', 0)}\n"
         f"败场：{stats.get('losses', 0)}\n"
         f"普通模式最高波数：{stats.get('best_normal_wave', 0)}\n"
@@ -360,5 +402,72 @@ def render_coop_contributions(room: CoopGameSession) -> str:
             f"{idx}. {name} | 击杀 {row['kills_contributed']} | 治疗 {row['heal_contributed']} | "
             f"建造 {row['build_count']} | 升级 {row['upgrade_count']} | 花费 {row['gold_spent']} | "
             f"赏金 {row['gold_earned']} | 当前金币 {row['gold']}"
+        )
+    return "\n".join(lines)
+
+
+def render_pvp_room(room: PvpGameSession) -> str:
+    lines = [
+        "【PVP 房间】",
+        f"状态：{room.status}",
+        f"房主：{room.host_user_id or '未知'}",
+        f"人数：{len(room.players)}/8",
+    ]
+    if room.map_state:
+        lines.append(f"共享地图：{room.map_state.name}")
+    lines.append("成员：")
+    for player in room.players.values():
+        name = player.nickname or player.user_id
+        host_mark = "（房主）" if player.user_id == room.host_user_id else ""
+        lines.append(f"- {name} {host_mark}".rstrip())
+    return "\n".join(lines)
+
+
+def render_pvp_player_state(room: PvpGameSession, player: PvpPlayerState) -> str:
+    map_name = room.map_state.name if room.map_state else "未知"
+    return (
+        f"【PVP 我的状态】\n"
+        f"玩家：{player.nickname or player.user_id}\n"
+        f"共享地图：{map_name}\n"
+        f"状态：{player.status}\n"
+        f"波次：第 {player.wave} 波\n"
+        f"回合：第 {player.turn} 回合\n"
+        f"金币：{player.gold}\n"
+        f"生命：{player.carrot_hp}/{player.max_carrot_hp}\n"
+        f"击杀：{player.total_kills}\n"
+        f"赏金：{player.total_gold_earned}\n"
+        f"治疗：{player.total_heals}\n"
+        f"可建造格：{room.get_buildable_cells_text(limit=16)}\n\n"
+        f"地图：\n{render_grid_map_from_state(room.map_state, player.towers)}\n\n"
+        f"敌人：\n{render_pvp_player_enemies(room, player)}\n\n"
+        f"防御塔：\n{render_pvp_player_towers(player)}"
+    )
+
+
+def render_pvp_status(room: PvpGameSession) -> str:
+    lines = [
+        "【PVP 总览】",
+        f"状态：{room.status}",
+        f"共享地图：{room.map_state.name if room.map_state else '未知'}",
+        f"人数：{len(room.players)}/8",
+        "玩家状态：",
+    ]
+    for row in room.get_rankings():
+        name = row["nickname"] or row["user_id"]
+        lines.append(
+            f"- {name} | 状态 {row['status']} | 波次 {row['wave']} | 回合 {row['turn']} | 生命 {row['carrot_hp']} | 击杀 {row['kills']} | 金币 {row['gold']}"
+        )
+    return "\n".join(lines)
+
+
+def render_pvp_rankings(room: PvpGameSession) -> str:
+    rows = room.get_rankings()
+    if not rows:
+        return "【PVP 排行】\n暂无数据"
+    lines = ["【PVP 排行】"]
+    for idx, row in enumerate(rows, start=1):
+        name = row["nickname"] or row["user_id"]
+        lines.append(
+            f"{idx}. {name} | 状态 {row['status']} | 波次 {row['wave']} | 回合 {row['turn']} | 生命 {row['carrot_hp']} | 击杀 {row['kills']} | 赏金 {row['gold_earned']}"
         )
     return "\n".join(lines)
