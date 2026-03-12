@@ -23,7 +23,7 @@ from .storage import JsonStorage
 from .utils import smart_compose, MAX_LOG_LINES, MAX_RANK_LINES, MAX_STATUS_LINES
 
 
-@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.3.0")
+@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.3.1")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -141,6 +141,13 @@ class CarrotDefenderPlugin(Star):
             "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔"
         )
 
+    async def _send_image_text(self, event: AstrMessageEvent, text: str, body_max_lines: int | None = None):
+        if body_max_lines is not None:
+            text = self._chunks(text, body_max_lines=body_max_lines)
+            text = "\n\n".join(text)
+        url = await self.text_to_image(text)
+        return event.image_result(url)
+
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
     async def carrot_help(self, event: AstrMessageEvent):
@@ -184,6 +191,15 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜状态图")
+    async def carrot_status_image(self, event: AstrMessageEvent):
+        session = self.game_manager.get_session(self._get_session_id(event))
+        if not session:
+            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始 或 /萝卜无尽")
+            return
+        yield await self._send_image_text(event, render_status(session), body_max_lines=MAX_STATUS_LINES)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜状态简洁")
     async def carrot_status_compact_cmd(self, event: AstrMessageEvent):
         session = self.game_manager.get_session(self._get_session_id(event))
@@ -202,6 +218,15 @@ class CarrotDefenderPlugin(Star):
             return
         for chunk in self._chunks(render_status_compact(session), body_max_lines=20):
             yield event.plain_result(chunk)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜速览图")
+    async def carrot_status_quick_image(self, event: AstrMessageEvent):
+        session = self.game_manager.get_session(self._get_session_id(event))
+        if not session:
+            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始 或 /萝卜无尽")
+            return
+        yield await self._send_image_text(event, render_status_compact(session), body_max_lines=20)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜建造")
@@ -374,11 +399,26 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜���录图")
+    async def carrot_record_image(self, event: AstrMessageEvent):
+        session = self.game_manager.get_session(self._get_session_id(event))
+        if not session:
+            yield event.plain_result("当前会话没有进行中的游戏记录")
+            return
+        yield await self._send_image_text(event, render_session_record(session), body_max_lines=20)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜排行")
     async def carrot_rank(self, event: AstrMessageEvent):
         rankings = self.storage.get_player_rankings()
         for chunk in self._chunks(render_player_rankings(rankings), body_max_lines=MAX_RANK_LINES):
             yield event.plain_result(chunk)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜排行图")
+    async def carrot_rank_image(self, event: AstrMessageEvent):
+        rankings = self.storage.get_player_rankings()
+        yield await self._send_image_text(event, render_player_rankings(rankings), body_max_lines=MAX_RANK_LINES)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜无尽排行")
@@ -388,11 +428,23 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜无尽排行图")
+    async def carrot_endless_rank_image(self, event: AstrMessageEvent):
+        rankings = self.storage.get_endless_rankings()
+        yield await self._send_image_text(event, render_endless_rankings(rankings), body_max_lines=MAX_RANK_LINES)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜群排行")
     async def carrot_room_rank(self, event: AstrMessageEvent):
         rankings = self.storage.get_room_rankings()
         for chunk in self._chunks(render_room_rankings(rankings), body_max_lines=MAX_RANK_LINES):
             yield event.plain_result(chunk)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜群排行图")
+    async def carrot_room_rank_image(self, event: AstrMessageEvent):
+        rankings = self.storage.get_room_rankings()
+        yield await self._send_image_text(event, render_room_rankings(rankings), body_max_lines=MAX_RANK_LINES)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜我的战绩")
@@ -401,6 +453,13 @@ class CarrotDefenderPlugin(Star):
         stats = self.storage.get_player_stats(user_id)
         for chunk in self._chunks(render_player_stats(user_id, stats), body_max_lines=20):
             yield event.plain_result(chunk)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜我的战绩图")
+    async def carrot_my_stats_image(self, event: AstrMessageEvent):
+        user_id = self._get_user_id(event)
+        stats = self.storage.get_player_stats(user_id)
+        yield await self._send_image_text(event, render_player_stats(user_id, stats), body_max_lines=20)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜结束")
