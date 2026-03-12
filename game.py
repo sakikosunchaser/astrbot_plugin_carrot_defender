@@ -8,6 +8,8 @@ import random
 GRID_ROWS = 5
 GRID_COLS = 5
 MAX_WAVE = 5
+COOP_MIN_PLAYERS = 2
+COOP_MAX_PLAYERS = 8
 
 TOWER_TEMPLATES = {
     "弓箭": {
@@ -28,8 +30,7 @@ TOWER_TEMPLATES = {
     },
     "冰塔": {
         "name": "冰塔",
-        "cost": 70,
-        "base_atk": 10,
+        "cost": 10,
         "range": 2,
         "upgrade_cost": 45,
         "kind": "slow",
@@ -251,48 +252,7 @@ class GameSession:
         )
 
     def spawn_wave(self, wave: int) -> None:
-        self.enemies = []
-        enemy_count = 2 + wave
-
-        for i in range(enemy_count):
-            if self.mode == "normal" and wave == MAX_WAVE and i == enemy_count - 1:
-                hp = 140 + wave * 25
-                self.enemies.append(
-                    Enemy(
-                        uid=f"boss-{wave}-{i}",
-                        name="Boss兔将军",
-                        hp=hp,
-                        max_hp=hp,
-                        speed=1,
-                        reward=120,
-                        armor=8,
-                        path_index=0,
-                    )
-                )
-                continue
-
-            base = random.choice(ENEMY_ARCHETYPES)
-            hp = base["hp"] + wave * 12
-            reward = base["reward"] + wave * 3
-            armor = base["armor"] + (1 if wave >= 3 else 0)
-
-            if self.mode == "endless":
-                hp += wave * 3
-                armor += wave // 4
-                reward += wave * 2
-
-            self.enemies.append(
-                Enemy(
-                    uid=f"e-{wave}-{i}",
-                    name=base["name"],
-                    hp=hp,
-                    max_hp=hp,
-                    speed=min(3, base["speed"] + (1 if self.mode == "endless" and wave >= 10 and random.random() < 0.2 else 0)),
-                    reward=reward,
-                    armor=armor,
-                    path_index=0,
-                )
-            )
+        self.enemies = spawn_enemies_for_wave(wave)
 
     def enemy_coord(self, enemy: Enemy) -> Tuple[int, int]:
         if not self.map_state:
@@ -632,6 +592,520 @@ class GameSession:
         return session
 
 
+def spawn_enemies_for_wave(wave: int) -> List[Enemy]:
+    enemies: List[Enemy] = []
+    enemy_count = 2 + wave
+
+    for i in range(enemy_count):
+        if wave == MAX_WAVE and i == enemy_count - 1:
+            hp = 140 + wave * 25
+            enemies.append(
+                Enemy(
+                    uid=f"coop-boss-{wave}-{i}",
+                    name="Boss兔将军",
+                    hp=hp,
+                    max_hp=hp,
+                    speed=1,
+                    reward=120,
+                    armor=8,
+                    path_index=0,
+                )
+            )
+            continue
+
+        base = random.choice(ENEMY_ARCHETYPES)
+        hp = base["hp"] + wave * 12
+        reward = base["reward"] + wave * 3
+        armor = base["armor"] + (1 if wave >= 3 else 0)
+
+        enemies.append(
+            Enemy(
+                uid=f"coop-{wave}-{i}",
+                name=base["name"],
+                hp=hp,
+                max_hp=hp,
+                speed=base["speed"],
+                reward=reward,
+                armor=armor,
+                path_index=0,
+            )
+        )
+    return enemies
+
+
+@dataclass
+class CoopPlayer:
+    user_id: str
+    nickname: str = ""
+    gold: int = 200
+    build_count: int = 0
+    upgrade_count: int = 0
+    remove_count: int = 0
+    gold_spent: int = 0
+    gold_earned: int = 0
+    heal_contributed: int = 0
+    kills_contributed: int = 0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CoopPlayer":
+        return cls(**data)
+
+
+@dataclass
+class CoopGameSession:
+    session_id: str
+    wave: int = 0
+    turn: int = 0
+    carrot_hp: int = 10
+    max_carrot_hp: int = 10
+    towers: Dict[str, Tower] = field(default_factory=dict)
+    enemies: List[Enemy] = field(default_factory=list)
+    players: Dict[str, CoopPlayer] = field(default_factory=dict)
+    status: str = "waiting"
+    host_user_id: str = ""
+    updated_at: str = ""
+    total_kills: int = 0
+    total_gold_earned: int = 0
+    total_heals: int = 0
+    map_state: Optional[MapState] = None
+
+    def enemy_coord(self, enemy: Enemy) -> Tuple[int, int]:
+        if not self.map_state:
+            return (0, 0)
+        idx = max(0, min(enemy.path_index, len(self.map_state.path) - 1))
+        return self.map_state.path[idx]
+
+    def get_buildable_cells(self) -> List[Tuple[int, int]]:
+        if not self.map_state:
+            return []
+
+        cells: List[Tuple[int, int]] = []
+        for row in range(GRID_ROWS):
+            for col in range(GRID_COLS):
+                if self.map_state.is_buildable(row, col):
+                    cells.append((row, col))
+        return cells
+
+    def get_buildable_cells_text(self, limit: int | None = None) -> str:
+        cells = self.get_buildable_cells()
+        if not cells:
+            return "无"
+        parts = [f"({r},{c})" for r, c in cells]
+        if limit is not None and len(parts) > limit:
+            shown = "、".join(parts[:limit])
+            return f"{shown} …… 共 {len(parts)} 个"
+        return "、".join(parts)
+
+    def _build_invalid_position_message(self, row: int, col: int) -> str:
+        if not in_bounds(row, col):
+            return (
+                f"坐标 ({row},{col}) 超出地图范围。\n"
+                f"有效范围：行 0~{GRID_ROWS - 1}，列 0~{GRID_COLS - 1}。"
+            )
+
+        if not self.map_state:
+            return "地图未初始化。"
+
+        if (row, col) == self.map_state.start():
+            return f"坐标 ({row},{col}) 是起点，不能建造。\n可建造格：{self.get_buildable_cells_text(limit=12)}"
+
+        if (row, col) == self.map_state.end():
+            return f"坐标 ({row},{col}) 是萝卜终点，不能建造。\n可建造格：{self.get_buildable_cells_text(limit=12)}"
+
+        if self.map_state.is_path_cell(row, col):
+            return f"坐标 ({row},{col}) 是敌人路径格，不能建造。\n可建造格：{self.get_buildable_cells_text(limit=12)}"
+
+        return f"坐标 ({row},{col}) 不可建造。\n可建造格：{self.get_buildable_cells_text(limit=12)}"
+
+    def add_player(self, user_id: str, nickname: str = "") -> Tuple[bool, str]:
+        if self.status != "waiting":
+            return False, "游戏已开始，不能再加入"
+        if user_id in self.players:
+            return False, "你已经在合作房间中了"
+        if len(self.players) >= COOP_MAX_PLAYERS:
+            return False, f"合作房间人数已满，最多 {COOP_MAX_PLAYERS} 人"
+        self.players[user_id] = CoopPlayer(user_id=user_id, nickname=nickname, gold=200)
+        return True, f"加入成功，当��人数：{len(self.players)}/{COOP_MAX_PLAYERS}"
+
+    def remove_player(self, user_id: str) -> Tuple[bool, str]:
+        if user_id not in self.players:
+            return False, "你不在合作房间中"
+        if self.status == "running":
+            return False, "游戏进行中暂不支持退出房间"
+
+        del self.players[user_id]
+        if self.host_user_id == user_id:
+            self.host_user_id = next(iter(self.players.keys()), "")
+        return True, "已退出合作房间"
+
+    def start(self, user_id: str) -> Tuple[bool, str]:
+        if user_id != self.host_user_id:
+            return False, "只有房主可以开始合作游戏"
+        if self.status != "waiting":
+            return False, "当前房间不处于等待状态"
+        if len(self.players) < COOP_MIN_PLAYERS:
+            return False, f"合作模式至少需要 {COOP_MIN_PLAYERS} 人"
+
+        self.wave = 1
+        self.turn = 0
+        self.carrot_hp = 10
+        self.max_carrot_hp = 10
+        self.towers = {}
+        self.enemies = []
+        self.map_state = random_map_state()
+        self.enemies = spawn_enemies_for_wave(1)
+        self.status = "running"
+        self.total_kills = 0
+        self.total_gold_earned = 0
+        self.total_heals = 0
+
+        for player in self.players.values():
+            player.gold = 200
+            player.build_count = 0
+            player.upgrade_count = 0
+            player.remove_count = 0
+            player.gold_spent = 0
+            player.gold_earned = 0
+            player.heal_contributed = 0
+            player.kills_contributed = 0
+
+        return True, (
+            f"合作模式已开始！地图：{self.map_state.name}，当前人数：{len(self.players)}，第 1 波敌人已出现\n"
+            f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+        )
+
+    def build_tower(self, user_id: str, tower_type: str, row: int, col: int) -> Tuple[bool, str]:
+        if self.status != "running":
+            return False, "合作游戏尚未开始"
+        player = self.players.get(user_id)
+        if not player:
+            return False, "你不在当前合作房间中"
+        if tower_type not in TOWER_TEMPLATES:
+            return False, "未知塔类型，可用：弓箭 / 炮塔 / 冰塔 / 治疗塔"
+        if not in_bounds(row, col):
+            return False, self._build_invalid_position_message(row, col)
+        if not self.map_state:
+            return False, "地图未初始化"
+        if not self.map_state.is_buildable(row, col):
+            return False, self._build_invalid_position_message(row, col)
+
+        key = f"{row},{col}"
+        if key in self.towers:
+            tower = self.towers[key]
+            return False, (
+                f"坐标 ({row},{col}) 已有防御塔：{tower.name} Lv{tower.level}。\n"
+                f"可使用：/萝卜合作升级 {row} {col} 或 /萝卜合作拆除 {row} {col}"
+            )
+
+        cost = TOWER_TEMPLATES[tower_type]["cost"]
+        if player.gold < cost:
+            return False, f"你的金币不足，需要 {cost}，当前仅有 {player.gold}"
+
+        player.gold -= cost
+        player.build_count += 1
+        player.gold_spent += cost
+        self.towers[key] = Tower(tower_type=tower_type, row=row, col=col, level=1, owner_user_id=user_id)
+        return True, f"你已在 ({row},{col}) 建造 {TOWER_TEMPLATES[tower_type]['name']}，消耗 {cost} 金币"
+
+    def upgrade_tower(self, user_id: str, row: int, col: int) -> Tuple[bool, str]:
+        if self.status != "running":
+            return False, "合作游戏尚未开始"
+        player = self.players.get(user_id)
+        if not player:
+            return False, "你不在当前合作房间中"
+
+        if not in_bounds(row, col):
+            return False, f"坐标 ({row},{col}) 超出地图范围，不能升级。"
+
+        key = f"{row},{col}"
+        tower = self.towers.get(key)
+        if not tower:
+            return False, f"坐标 ({row},{col}) 没有防御塔，无法升级。"
+        if tower.level >= 5:
+            return False, "该防御塔已满级"
+
+        cost = tower.upgrade_cost
+        if player.gold < cost:
+            return False, f"你的金币不足，升级需要 {cost}，当前仅有 {player.gold}"
+
+        player.gold -= cost
+        player.upgrade_count += 1
+        player.gold_spent += cost
+        tower.level += 1
+        return True, f"你将 ({row},{col}) 的 {tower.name} 升级到 Lv{tower.level}，消耗 {cost} 金币"
+
+    def remove_tower(self, user_id: str, row: int, col: int) -> Tuple[bool, str]:
+        if self.status != "running":
+            return False, "合作游戏尚未开始"
+        player = self.players.get(user_id)
+        if not player:
+            return False, "你不在当前合作房间中"
+
+        if not in_bounds(row, col):
+            return False, f"坐标 ({row},{col}) 超出地图范围，不能拆除。"
+
+        key = f"{row},{col}"
+        tower = self.towers.get(key)
+        if not tower:
+            return False, f"坐标 ({row},{col}) 没有防御塔，无法拆除。"
+
+        refund = int((tower.cfg["cost"] + (tower.level - 1) * tower.cfg["upgrade_cost"]) * 0.5)
+        player.gold += refund
+        player.remove_count += 1
+        del self.towers[key]
+        return True, f"你拆除了 ({row},{col}) 的 {tower.name}，返还 {refund} 金币"
+
+    def next_wave(self, user_id: str) -> Tuple[bool, str]:
+        if self.status != "running":
+            return False, "合作游戏尚未开始"
+        if user_id != self.host_user_id:
+            return False, "只有房主可以推进到下一波"
+        if any(e.alive for e in self.enemies):
+            return False, "当前还有敌人存活，不能直接进入下一波"
+
+        if self.wave >= MAX_WAVE:
+            self.status = "win"
+            return True, "所有波次已完成，恭喜你们成功保卫了萝卜！"
+
+        self.wave += 1
+        self.turn = 0
+        self.enemies = spawn_enemies_for_wave(self.wave)
+        return True, f"第 {self.wave} 波开始！敌人来袭！"
+
+    def step_turn(self, user_id: str) -> Tuple[bool, str]:
+        if self.status != "running":
+            return False, "合作游戏尚未开始"
+        if user_id != self.host_user_id:
+            return False, "只有房主可以推进回合"
+        if not any(e.alive for e in self.enemies):
+            if self.wave >= MAX_WAVE:
+                self.status = "win"
+                return True, "所有波次都已清空，恭喜通关！"
+            return False, "当前没有敌人，请使用 /萝卜合作下一波"
+
+        self.turn += 1
+        logs: List[str] = [f"【合作模式】地图：{self.map_state.name if self.map_state else '未知'} | 第 {self.wave} 波 - 第 {self.turn} 回合"]
+        logs.extend(self._tower_attack_phase())
+
+        reward_pool = 0
+        dead_count = 0
+        for enemy in self.enemies:
+            if enemy.alive and enemy.hp <= 0:
+                enemy.alive = False
+                reward_pool += enemy.reward
+                dead_count += 1
+                owner = enemy.last_hit_owner
+                if owner and owner in self.players:
+                    self.players[owner].kills_contributed += 1
+                logs.append(f"{enemy.name} 被击败，掉落 {enemy.reward} 金币")
+
+        if reward_pool > 0 and self.players:
+            per_player = reward_pool // len(self.players)
+            extra = reward_pool % len(self.players)
+            player_ids = sorted(self.players.keys())
+            for idx, pid in enumerate(player_ids):
+                gain = per_player + (1 if idx < extra else 0)
+                self.players[pid].gold += gain
+                self.players[pid].gold_earned += gain
+            self.total_gold_earned += reward_pool
+            self.total_kills += dead_count
+            logs.append(f"本回合共掉落 {reward_pool} 金币，已按人数平分")
+
+        if any(e.alive for e in self.enemies):
+            logs.extend(self._enemy_move_phase())
+
+        logs.extend(self._heal_phase())
+
+        for enemy in self.enemies:
+            if enemy.alive and enemy.slow_turns > 0:
+                enemy.slow_turns -= 1
+
+        if self.carrot_hp <= 0:
+            self.status = "lose"
+            logs.append("萝卜生命归零，合作游戏失败！")
+        elif not any(e.alive for e in self.enemies):
+            if self.wave >= MAX_WAVE:
+                self.status = "win"
+                logs.append("所有波次已清空，恭喜通关！")
+            else:
+                logs.append(f"第 {self.wave} 波已清空，可使用 /萝卜合作下一波")
+
+        return True, "\n".join(logs)
+
+    def _tower_attack_phase(self) -> List[str]:
+        logs: List[str] = []
+        if not self.towers:
+            return ["本回合没有防御塔出手"]
+
+        for key in sorted(self.towers.keys()):
+            tower = self.towers[key]
+            if tower.kind == "heal":
+                logs.append(f"{tower.name}({tower.row},{tower.col},Lv{tower.level}) 待机治疗")
+                continue
+
+            targets = []
+            for enemy in self.enemies:
+                if not enemy.alive:
+                    continue
+                er, ec = self.enemy_coord(enemy)
+                if manhattan((tower.row, tower.col), (er, ec)) <= tower.range:
+                    targets.append(enemy)
+
+            targets.sort(key=lambda e: (-e.path_index, e.hp))
+            if not targets:
+                logs.append(f"{tower.name}({tower.row},{tower.col}) 未找到目标")
+                continue
+
+            main_target = targets[0]
+            dmg = max(1, tower.atk - main_target.armor)
+            main_target.hp -= dmg
+            main_target.last_hit_owner = tower.owner_user_id
+            owner_name = self._player_name(tower.owner_user_id)
+            logs.append(f"{tower.name}({tower.row},{tower.col},Lv{tower.level})[{owner_name}] 攻击 {main_target.name}，造成 {dmg} 伤害")
+
+            if tower.kind == "splash":
+                for extra in targets[1:3]:
+                    splash = max(1, tower.atk // 2 - extra.armor)
+                    extra.hp -= splash
+                    extra.last_hit_owner = tower.owner_user_id
+                    logs.append(f"  ↳ 溅射到 {extra.name}，造成 {splash} 伤害")
+            elif tower.kind == "slow":
+                main_target.slow_turns = max(main_target.slow_turns, 2)
+                logs.append(f"  ↳ {main_target.name} 被减速 2 回合")
+        return logs
+
+    def _enemy_move_phase(self) -> List[str]:
+        logs: List[str] = []
+        if not self.map_state:
+            return logs
+
+        last_index = len(self.map_state.path) - 1
+        for enemy in self.enemies:
+            if not enemy.alive:
+                continue
+            old_index = enemy.path_index
+            enemy.path_index += enemy.get_actual_speed()
+            if enemy.path_index >= last_index:
+                enemy.alive = False
+                self.carrot_hp -= 1
+                logs.append(f"{enemy.name} 冲到了萝卜！萝卜生命 -1")
+            else:
+                old_pos = self.map_state.path[old_index]
+                new_pos = self.map_state.path[enemy.path_index]
+                logs.append(f"{enemy.name} 从 {old_pos} 前进到 {new_pos}")
+        return logs
+
+    def _heal_phase(self) -> List[str]:
+        logs: List[str] = []
+        total_heal = 0
+        owner_heal: Dict[str, int] = {}
+        for tower in self.towers.values():
+            if tower.kind != "heal":
+                continue
+            amount = tower.heal_amount
+            total_heal += amount
+            owner_heal[tower.owner_user_id] = owner_heal.get(tower.owner_user_id, 0) + amount
+
+        if total_heal <= 0:
+            return logs
+        if self.carrot_hp >= self.max_carrot_hp:
+            logs.append("治疗塔尝试治疗，但萝卜生命已满")
+            return logs
+
+        before = self.carrot_hp
+        self.carrot_hp = min(self.max_carrot_hp, self.carrot_hp + total_heal)
+        actual = self.carrot_hp - before
+        if actual <= 0:
+            return logs
+
+        self.total_heals += actual
+        total_owner_heal = sum(owner_heal.values())
+        if total_owner_heal > 0:
+            assigned = 0
+            owner_ids = sorted(owner_heal.keys())
+            for idx, oid in enumerate(owner_ids):
+                raw = owner_heal[oid]
+                share = actual * raw // total_owner_heal
+                if idx == len(owner_ids) - 1:
+                    share = actual - assigned
+                assigned += share
+                if oid in self.players:
+                    self.players[oid].heal_contributed += share
+
+        logs.append(f"治疗塔共为萝卜恢复了 {actual} 点生命")
+        return logs
+
+    def _player_name(self, user_id: str) -> str:
+        player = self.players.get(user_id)
+        if not player:
+            return user_id
+        return player.nickname or player.user_id
+
+    def get_contribution_rankings(self) -> List[dict]:
+        rows = []
+        for player in self.players.values():
+            rows.append(
+                {
+                    "user_id": player.user_id,
+                    "nickname": player.nickname,
+                    "gold": player.gold,
+                    "build_count": player.build_count,
+                    "upgrade_count": player.upgrade_count,
+                    "remove_count": player.remove_count,
+                    "gold_spent": player.gold_spent,
+                    "gold_earned": player.gold_earned,
+                    "heal_contributed": player.heal_contributed,
+                    "kills_contributed": player.kills_contributed,
+                }
+            )
+        rows.sort(key=lambda x: (-x["kills_contributed"], -x["heal_contributed"], -x["build_count"], -x["upgrade_count"], -x["gold_spent"]))
+        return rows
+
+    def to_dict(self) -> dict:
+        return {
+            "session_id": self.session_id,
+            "wave": self.wave,
+            "turn": self.turn,
+            "carrot_hp": self.carrot_hp,
+            "max_carrot_hp": self.max_carrot_hp,
+            "towers": {k: v.to_dict() for k, v in self.towers.items()},
+            "enemies": [e.to_dict() for e in self.enemies],
+            "players": {uid: p.to_dict() for uid, p in self.players.items()},
+            "status": self.status,
+            "host_user_id": self.host_user_id,
+            "updated_at": self.updated_at,
+            "total_kills": self.total_kills,
+            "total_gold_earned": self.total_gold_earned,
+            "total_heals": self.total_heals,
+            "map_state": self.map_state.to_dict() if self.map_state else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CoopGameSession":
+        session = cls(
+            session_id=data["session_id"],
+            wave=data.get("wave", 0),
+            turn=data.get("turn", 0),
+            carrot_hp=data.get("carrot_hp", 10),
+            max_carrot_hp=data.get("max_carrot_hp", 10),
+            status=data.get("status", "waiting"),
+            host_user_id=data.get("host_user_id", ""),
+            updated_at=data.get("updated_at", ""),
+            total_kills=data.get("total_kills", 0),
+            total_gold_earned=data.get("total_gold_earned", 0),
+            total_heals=data.get("total_heals", 0),
+        )
+        session.towers = {k: Tower.from_dict(v) for k, v in data.get("towers", {}).items()}
+        session.enemies = [Enemy.from_dict(e) for e in data.get("enemies", [])]
+        session.players = {uid: CoopPlayer.from_dict(p) for uid, p in data.get("players", {}).items()}
+        raw_map = data.get("map_state")
+        session.map_state = MapState.from_dict(raw_map) if raw_map else None
+        return session
+
+
 class GameManager:
     def __init__(self):
         self.sessions: Dict[str, GameSession] = {}
@@ -652,6 +1126,33 @@ class GameManager:
         self.sessions = {}
         for sid, session_data in raw.items():
             self.sessions[sid] = GameSession.from_dict(session_data)
+
+    def dump_sessions(self) -> dict:
+        return {sid: session.to_dict() for sid, session in self.sessions.items()}
+
+
+class CoopGameManager:
+    def __init__(self):
+        self.sessions: Dict[str, CoopGameSession] = {}
+
+    def get_session(self, session_id: str) -> Optional[CoopGameSession]:
+        return self.sessions.get(session_id)
+
+    def create_room(self, session_id: str, host_user_id: str, nickname: str = "") -> Tuple[bool, str, Optional[CoopGameSession]]:
+        if session_id in self.sessions:
+            return False, "当前会话已经存在合作房间", None
+        room = CoopGameSession(session_id=session_id, host_user_id=host_user_id, status="waiting")
+        room.players[host_user_id] = CoopPlayer(user_id=host_user_id, nickname=nickname, gold=200)
+        self.sessions[session_id] = room
+        return True, "合作房间已创建，你已成为房主", room
+
+    def remove_room(self, session_id: str) -> Optional[CoopGameSession]:
+        return self.sessions.pop(session_id, None)
+
+    def load_sessions(self, raw: dict) -> None:
+        self.sessions = {}
+        for sid, session_data in raw.items():
+            self.sessions[sid] = CoopGameSession.from_dict(session_data)
 
     def dump_sessions(self) -> dict:
         return {sid: session.to_dict() for sid, session in self.sessions.items()}
