@@ -20,7 +20,7 @@ from .render import (
     render_status_compact,
 )
 from .storage import JsonStorage
-from .utils import smart_compose, MAX_LOG_LINES, MAX_RANK_LINES, MAX_STATUS_LINES
+from .utils import smart_compose, MAX_RANK_LINES, MAX_STATUS_LINES
 from .image_render import (
     build_status_payload,
     build_rank_payload,
@@ -29,7 +29,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.3")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.4")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -40,6 +40,10 @@ class CarrotDefenderPlugin(Star):
         self.storage = JsonStorage(base_dir)
 
         self.game_manager.load_sessions(self.storage.load_sessions())
+
+        # 安全渲染模式：image / text
+        # 默认先尝试图片，但永远自动 fallback 到文本
+        self.render_mode = "image"
 
     def _get_session_id(self, event: AstrMessageEvent) -> str:
         try:
@@ -200,16 +204,63 @@ class CarrotDefenderPlugin(Star):
 
         return "\n".join(lines).strip()
 
+    async def _try_text_to_image(self, text: str) -> tuple[bool, str]:
+        try:
+            url = await self.text_to_image(text)
+            return True, url
+        except Exception:
+            return False, text
+
     async def _send_panel(self, event: AstrMessageEvent, payload: dict, body_max_lines: int | None = None):
-        result_value = self._payload_to_plain_text(payload)
-        for chunk in self._chunks(result_value, body_max_lines=body_max_lines):
+        plain_text = self._payload_to_plain_text(payload)
+
+        if self.render_mode == "image":
+            ok, result = await self._try_text_to_image(plain_text)
+            if ok:
+                yield event.image_result(result)
+                return
+
+        for chunk in self._chunks(plain_text, body_max_lines=body_max_lines):
+            yield event.plain_result(chunk)
+
+    async def _send_text(self, event: AstrMessageEvent, text: str, body_max_lines: int | None = None):
+        for chunk in self._chunks(text, body_max_lines=body_max_lines):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
     async def carrot_help(self, event: AstrMessageEvent):
-        for chunk in self._chunks(render_help(), body_max_lines=24):
-            yield event.plain_result(chunk)
+        help_text = (
+            render_help()
+            + "\n\n—— 渲染控制 ——\n"
+            + "/萝卜渲染 图片\n"
+            + "/萝卜渲染 文本\n"
+            + f"当前渲染模式：{self.render_mode}"
+        )
+        async for result in self._send_text(event, help_text, body_max_lines=30):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜渲染")
+    async def carrot_render_mode(self, event: AstrMessageEvent, mode=None):
+        mode_text = str(mode).strip() if mode is not None else ""
+
+        if mode_text in ("图片", "image", "img", "图"):
+            self.render_mode = "image"
+            yield event.plain_result("已切换为图片优先模式：先尝试 text_to_image，失败自动回退文本。")
+            return
+
+        if mode_text in ("文本", "text", "txt"):
+            self.render_mode = "text"
+            yield event.plain_result("已切换为纯文本模式：不再尝试���片渲染。")
+            return
+
+        yield event.plain_result(
+            f"当前渲染模式：{self.render_mode}\n"
+            "可用命令：\n"
+            "/萝卜渲染 图片\n"
+            "/萝卜渲染 文本"
+        )
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜开始")
@@ -275,8 +326,8 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
             return
 
-        for chunk in self._chunks(render_status(session), body_max_lines=MAX_STATUS_LINES):
-            yield event.plain_result(chunk)
+        async for result in self._send_text(event, render_status(session), body_max_lines=MAX_STATUS_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜速览文本")
@@ -286,8 +337,8 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
             return
 
-        for chunk in self._chunks(render_status_compact(session), body_max_lines=30):
-            yield event.plain_result(chunk)
+        async for result in self._send_text(event, render_status_compact(session), body_max_lines=30):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜建造")
@@ -315,8 +366,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=True)
                 text = f"【建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
-                for chunk in self._chunks(text, body_max_lines=30):
-                    yield event.plain_result(chunk)
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=30):
+                    yield result
             else:
                 yield event.plain_result(msg)
 
@@ -344,8 +400,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=True)
                 text = f"【升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
-                for chunk in self._chunks(text, body_max_lines=30):
-                    yield event.plain_result(chunk)
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=30):
+                    yield result
             else:
                 yield event.plain_result(msg)
 
@@ -373,8 +434,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=True)
                 text = f"【拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
-                for chunk in self._chunks(text, body_max_lines=30):
-                    yield event.plain_result(chunk)
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=30):
+                    yield result
             else:
                 yield event.plain_result(msg)
 
@@ -398,8 +464,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=False)
                 text = f"【回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
-                for chunk in self._chunks(text, body_max_lines=MAX_STATUS_LINES):
-                    yield event.plain_result(chunk)
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=MAX_STATUS_LINES):
+                    yield result
             else:
                 yield event.plain_result(msg)
 
@@ -423,8 +494,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=False)
                 text = f"【波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
-                for chunk in self._chunks(text, body_max_lines=MAX_STATUS_LINES):
-                    yield event.plain_result(chunk)
+                if self.render_mode == "image":
+                    ok_img, result = await self._try_text_to_image(text)
+                    if ok_img:
+                        yield event.image_result(result)
+                        return
+                async for result in self._send_text(event, text, body_max_lines=MAX_STATUS_LINES):
+                    yield result
             else:
                 yield event.plain_result(msg)
 
@@ -448,8 +524,8 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前会话没有进行中的游戏记录")
             return
 
-        for chunk in self._chunks(render_session_record(session), body_max_lines=20):
-            yield event.plain_result(chunk)
+        async for result in self._send_text(event, render_session_record(session), body_max_lines=20):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜排行")
