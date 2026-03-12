@@ -22,7 +22,6 @@ from .render import (
 from .storage import JsonStorage
 from .utils import smart_compose, MAX_LOG_LINES, MAX_RANK_LINES, MAX_STATUS_LINES
 from .image_render import (
-    CARD_TEMPLATE,
     build_status_payload,
     build_rank_payload,
     build_player_stats_payload,
@@ -30,7 +29,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.3.4")
+@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.3.5")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -217,17 +216,11 @@ class CarrotDefenderPlugin(Star):
 
     async def _render_panel_image(self, payload: dict) -> tuple[str, str]:
         plain_text = self._payload_to_plain_text(payload)
-
         try:
-            options = {"type": "png"}
-            url = await self.html_render(CARD_TEMPLATE, payload, options=options)
+            url = await self.text_to_image(plain_text)
             return "image", url
         except Exception:
-            try:
-                url = await self.text_to_image(plain_text)
-                return "image", url
-            except Exception:
-                return "text", plain_text
+            return "text", plain_text
 
     async def _send_panel(self, event: AstrMessageEvent, payload: dict, body_max_lines: int | None = None):
         result_type, result_value = await self._render_panel_image(payload)
