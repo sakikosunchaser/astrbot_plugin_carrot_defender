@@ -9,11 +9,11 @@ def _mode_text(mode: str) -> str:
 
 def _tower_short_name(tower_type: str) -> str:
     return {
-        "弓箭": "弓",
-        "炮塔": "炮",
-        "冰塔": "冰",
-        "治疗塔": "奶",
-    }.get(tower_type, "塔")
+        "弓箭": "A",
+        "炮塔": "C",
+        "冰塔": "I",
+        "治疗塔": "H",
+    }.get(tower_type, "T")
 
 
 def build_map_grid_lines(game: GameSession) -> list[str]:
@@ -23,21 +23,23 @@ def build_map_grid_lines(game: GameSession) -> list[str]:
     grid = [["·" for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
 
     for r, c in game.map_state.path:
-        grid[r][c] = "路"
+        grid[r][c] = "*"
 
     sr, sc = game.map_state.start()
     er, ec = game.map_state.end()
-    grid[sr][sc] = "起"
-    grid[er][ec] = "萝"
+    grid[sr][sc] = "S"
+    grid[er][ec] = "R"
 
     for tower in game.towers.values():
         grid[tower.row][tower.col] = _tower_short_name(tower.tower_type)
 
     lines = []
-    header = "   " + " ".join(str(c) for c in range(GRID_COLS))
-    lines.append(header)
+    lines.append("   " + "  ".join(str(c) for c in range(GRID_COLS)))
     for r in range(GRID_ROWS):
-        lines.append(f"{r}  " + " ".join(grid[r]))
+        lines.append(f"{r}  " + "  ".join(grid[r]))
+
+    lines.append("")
+    lines.append("图例：S=起点 R=萝卜 *=路径 A=弓 C=炮 I=冰 H=治")
     return lines
 
 
@@ -67,10 +69,10 @@ def build_tower_items(game: GameSession) -> list[dict]:
         tower = game.towers[key]
         if tower.kind == "heal":
             main = f"({tower.row},{tower.col}) {tower.name} Lv{tower.level}"
-            sub = f"治疗 {tower.heal_amount} ｜ 升级费用 {tower.upgrade_cost}"
+            sub = f"标记 {_tower_short_name(tower.tower_type)} ｜ 治疗 {tower.heal_amount} ｜ 升级费用 {tower.upgrade_cost}"
         else:
             main = f"({tower.row},{tower.col}) {tower.name} Lv{tower.level}"
-            sub = f"ATK {tower.atk} ｜ 射程 {tower.range} ｜ 升级费用 {tower.upgrade_cost}"
+            sub = f"标记 {_tower_short_name(tower.tower_type)} ｜ ATK {tower.atk} ｜ 射程 {tower.range} ｜ 升级费用 {tower.upgrade_cost}"
         items.append({"main": main, "sub": sub})
     return items
 
@@ -83,9 +85,11 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
         alive.sort(key=lambda x: (-x.path_index, x.hp))
         front_enemy = alive[0]
 
+    map_name = game.map_state.name if game.map_state else "未知"
+
     stats = [
         {"label": "模式", "value": _mode_text(game.mode)},
-        {"label": "地图", "value": game.map_state.name if game.map_state else "未知"},
+        {"label": "地图", "value": map_name},
         {"label": "波次 / 回合", "value": f"{game.wave} / {game.turn}"},
         {"label": "金币", "value": str(game.gold)},
         {"label": "生命", "value": f"{game.carrot_hp}/{game.max_carrot_hp}"},
@@ -129,7 +133,7 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
 
     return {
         "title": "保卫萝卜 · 随机路径状态面板",
-        "subtitle": f"状态：{game.status} ｜ 累计击杀 {game.total_kills} ｜ 累计治疗 {game.total_heals}",
+        "subtitle": f"状态：{game.status} ｜ 地图：{map_name} ｜ 累计击杀 {game.total_kills}",
         "badge": _mode_text(game.mode),
         "stats": stats + [
             {"label": "总赏金", "value": str(game.total_gold_earned)},
@@ -229,7 +233,7 @@ def build_player_stats_payload(user_id: str, stats: dict) -> dict:
                 "kv": [
                     {"label": "总局数", "value": stats.get("games", 0)},
                     {"label": "胜场", "value": stats.get("wins", 0)},
-                    {"label": "败���", "value": stats.get("losses", 0)},
+                    {"label": "败场", "value": stats.get("losses", 0)},
                     {"label": "最高生存回合", "value": stats.get("best_turn_survived", 0)},
                     {"label": "普通最高波数", "value": stats.get("best_normal_wave", 0)},
                     {"label": "无尽最高波数", "value": stats.get("best_endless_wave", 0)},
