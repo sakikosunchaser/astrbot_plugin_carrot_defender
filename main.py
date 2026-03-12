@@ -29,7 +29,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.2")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.3")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -145,7 +145,7 @@ class CarrotDefenderPlugin(Star):
         return (
             "建造命令格式：/萝卜建造 塔类型 行 列\n"
             "示例：/萝卜建造 弓箭 2 3\n"
-            "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗���\n"
+            "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔\n"
             "注意：不能建在路径、起点、萝卜终点上"
         )
 
@@ -200,22 +200,10 @@ class CarrotDefenderPlugin(Star):
 
         return "\n".join(lines).strip()
 
-    async def _render_panel_image(self, payload: dict) -> tuple[str, str]:
-        plain_text = self._payload_to_plain_text(payload)
-
-        try:
-            url = await self.text_to_image(plain_text)
-            return "image", url
-        except Exception:
-            return "text", plain_text
-
     async def _send_panel(self, event: AstrMessageEvent, payload: dict, body_max_lines: int | None = None):
-        result_type, result_value = await self._render_panel_image(payload)
-        if result_type == "image":
-            yield event.image_result(result_value)
-        else:
-            for chunk in self._chunks(result_value, body_max_lines=body_max_lines):
-                yield event.plain_result(chunk)
+        result_value = self._payload_to_plain_text(payload)
+        for chunk in self._chunks(result_value, body_max_lines=body_max_lines):
+            yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
@@ -236,7 +224,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             payload = build_status_payload(session, compact=True)
-            async for result in self._send_panel(event, payload, body_max_lines=20):
+            async for result in self._send_panel(event, payload, body_max_lines=30):
                 yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -252,7 +240,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             payload = build_status_payload(session, compact=True)
-            async for result in self._send_panel(event, payload, body_max_lines=20):
+            async for result in self._send_panel(event, payload, body_max_lines=30):
                 yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -276,7 +264,7 @@ class CarrotDefenderPlugin(Star):
             return
 
         payload = build_status_payload(session, compact=True)
-        async for result in self._send_panel(event, payload, body_max_lines=20):
+        async for result in self._send_panel(event, payload, body_max_lines=30):
             yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -298,7 +286,7 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
             return
 
-        for chunk in self._chunks(render_status_compact(session), body_max_lines=20):
+        for chunk in self._chunks(render_status_compact(session), body_max_lines=30):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -326,8 +314,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                async for result in self._send_panel(event, payload, body_max_lines=20):
-                    yield result
+                text = f"【建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                for chunk in self._chunks(text, body_max_lines=30):
+                    yield event.plain_result(chunk)
             else:
                 yield event.plain_result(msg)
 
@@ -354,8 +343,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                async for result in self._send_panel(event, payload, body_max_lines=20):
-                    yield result
+                text = f"【升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                for chunk in self._chunks(text, body_max_lines=30):
+                    yield event.plain_result(chunk)
             else:
                 yield event.plain_result(msg)
 
@@ -382,8 +372,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                async for result in self._send_panel(event, payload, body_max_lines=20):
-                    yield result
+                text = f"【拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                for chunk in self._chunks(text, body_max_lines=30):
+                    yield event.plain_result(chunk)
             else:
                 yield event.plain_result(msg)
 
@@ -406,8 +397,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=False)
-                async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
-                    yield result
+                text = f"【回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                for chunk in self._chunks(text, body_max_lines=MAX_STATUS_LINES):
+                    yield event.plain_result(chunk)
             else:
                 yield event.plain_result(msg)
 
@@ -430,8 +422,9 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=False)
-                async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
-                    yield result
+                text = f"【波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                for chunk in self._chunks(text, body_max_lines=MAX_STATUS_LINES):
+                    yield event.plain_result(chunk)
             else:
                 yield event.plain_result(msg)
 
