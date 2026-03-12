@@ -28,16 +28,21 @@ def build_map_grid_lines(game: GameSession) -> list[str]:
     sr, sc = game.map_state.start()
     er, ec = game.map_state.end()
     grid[sr][sc] = "起"
-    grid[er][ec] = "🥕"
+    grid[er][ec] = "萝"
 
     for tower in game.towers.values():
         grid[tower.row][tower.col] = _tower_short_name(tower.tower_type)
 
     lines = []
-    lines.append("   " + " ".join(str(c) for c in range(GRID_COLS)))
+    header = "   " + " ".join(str(c) for c in range(GRID_COLS))
+    lines.append(header)
     for r in range(GRID_ROWS):
         lines.append(f"{r}  " + " ".join(grid[r]))
     return lines
+
+
+def build_map_text(game: GameSession) -> str:
+    return "\n".join(build_map_grid_lines(game))
 
 
 def build_enemy_items(game: GameSession) -> list[dict]:
@@ -86,7 +91,7 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
         {"label": "生命", "value": f"{game.carrot_hp}/{game.max_carrot_hp}"},
     ]
 
-    map_items = [{"main": line, "sub": ""} for line in build_map_grid_lines(game)]
+    map_text = build_map_text(game)
 
     if compact:
         return {
@@ -97,8 +102,7 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
             "sections": [
                 {
                     "title": "地图",
-                    "items": map_items,
-                    "empty_text": "暂无地图",
+                    "text_block": map_text,
                 },
                 {
                     "title": "战况速览",
@@ -136,8 +140,7 @@ def build_status_payload(game: GameSession, compact: bool = False) -> dict:
         "sections": [
             {
                 "title": "地图",
-                "items": map_items,
-                "empty_text": "暂无地图",
+                "text_block": map_text,
             },
             {
                 "title": "敌人列表",
@@ -226,7 +229,7 @@ def build_player_stats_payload(user_id: str, stats: dict) -> dict:
                 "kv": [
                     {"label": "总局数", "value": stats.get("games", 0)},
                     {"label": "胜场", "value": stats.get("wins", 0)},
-                    {"label": "败场", "value": stats.get("losses", 0)},
+                    {"label": "败���", "value": stats.get("losses", 0)},
                     {"label": "最高生存回合", "value": stats.get("best_turn_survived", 0)},
                     {"label": "普通最高波数", "value": stats.get("best_normal_wave", 0)},
                     {"label": "无尽最高波数", "value": stats.get("best_endless_wave", 0)},
