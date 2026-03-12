@@ -30,7 +30,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.3.2")
+@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.3.3")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -148,11 +148,94 @@ class CarrotDefenderPlugin(Star):
             "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔"
         )
 
-    async def _render_panel_image(self, payload: dict):
-        options = {
-            "type": "png",
-        }
-        return await self.html_render(CARD_TEMPLATE, payload, options=options)
+    def _payload_to_plain_text(self, payload: dict) -> str:
+        lines = []
+
+        title = payload.get("title", "")
+        subtitle = payload.get("subtitle", "")
+        badge = payload.get("badge", "")
+
+        if title:
+            lines.append(str(title))
+        if subtitle:
+            lines.append(str(subtitle))
+        if badge:
+            lines.append(f"标签：{badge}")
+
+        stats = payload.get("stats", [])
+        if stats:
+            lines.append("")
+            lines.append("【概览】")
+            for item in stats:
+                lines.append(f"{item.get('label', '')}：{item.get('value', '')}")
+
+        map_nodes = payload.get("map_nodes", [])
+        if map_nodes:
+            lines.append("")
+            lines.append("【地图】")
+            lines.append(" -> ".join(str(x.get("text", "")) for x in map_nodes))
+
+        two_col = payload.get("two_col", [])
+        for col in two_col:
+            lines.append("")
+            lines.append(f"【{col.get('title', '')}】")
+            items = col.get("items", [])
+            if items:
+                for item in items:
+                    main = str(item.get("main", ""))
+                    sub = str(item.get("sub", ""))
+                    lines.append(f"- {main}")
+                    if sub:
+                        lines.append(f"  {sub}")
+            else:
+                lines.append(col.get("empty_text", "暂无内容"))
+
+        sections = payload.get("sections", [])
+        for sec in sections:
+            lines.append("")
+            lines.append(f"【{sec.get('title', '')}】")
+
+            kv = sec.get("kv", [])
+            if kv:
+                for row in kv:
+                    lines.append(f"{row.get('label', '')}：{row.get('value', '')}")
+                continue
+
+            items = sec.get("items", [])
+            if items:
+                for item in items:
+                    prefix = f"{item.get('no')}. " if item.get("no") else "- "
+                    main = str(item.get("main", ""))
+                    sub = str(item.get("sub", ""))
+                    lines.append(prefix + main)
+                    if sub:
+                        lines.append(f"  {sub}")
+            else:
+                lines.append(sec.get("empty_text", "暂无内容"))
+
+        return "\n".join(lines).strip()
+
+    async def _render_panel_image(self, payload: dict) -> tuple[str, str]:
+        plain_text = self._payload_to_plain_text(payload)
+
+        try:
+            options = {"type": "png"}
+            url = await self.html_render(CARD_TEMPLATE, payload, options=options)
+            return "image", url
+        except Exception:
+            try:
+                url = await self.text_to_image(plain_text)
+                return "image", url
+            except Exception:
+                return "text", plain_text
+
+    async def _send_panel(self, event: AstrMessageEvent, payload: dict, body_max_lines: int | None = None):
+        result_type, result_value = await self._render_panel_image(payload)
+        if result_type == "image":
+            yield event.image_result(result_value)
+        else:
+            for chunk in self._chunks(result_value, body_max_lines=body_max_lines):
+                yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
@@ -204,8 +287,8 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始 或 /萝卜无尽")
             return
         payload = build_status_payload(session, compact=False)
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜状态简洁")
@@ -235,8 +318,8 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始 或 /萝卜无尽")
             return
         payload = build_status_payload(session, compact=True)
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜建造")
@@ -416,8 +499,8 @@ class CarrotDefenderPlugin(Star):
             yield event.plain_result("当前会话没有进行中的游戏记录")
             return
         payload = build_session_record_payload(session)
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜排行")
@@ -431,8 +514,8 @@ class CarrotDefenderPlugin(Star):
     async def carrot_rank_image(self, event: AstrMessageEvent):
         rankings = self.storage.get_player_rankings()
         payload = build_rank_payload("玩家排行榜", rankings, kind="player")
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_RANK_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜无尽排行")
@@ -446,8 +529,8 @@ class CarrotDefenderPlugin(Star):
     async def carrot_endless_rank_image(self, event: AstrMessageEvent):
         rankings = self.storage.get_endless_rankings()
         payload = build_rank_payload("无尽排行榜", rankings, kind="endless")
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_RANK_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜群排行")
@@ -461,8 +544,8 @@ class CarrotDefenderPlugin(Star):
     async def carrot_room_rank_image(self, event: AstrMessageEvent):
         rankings = self.storage.get_room_rankings()
         payload = build_rank_payload("群排行榜", rankings, kind="room")
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_RANK_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜我的战绩")
@@ -483,8 +566,8 @@ class CarrotDefenderPlugin(Star):
             wins = int(stats.get("wins", 0))
             stats["win_rate"] = round((wins / games * 100), 2) if games > 0 else 0.0
         payload = build_player_stats_payload(user_id, stats)
-        url = await self._render_panel_image(payload)
-        yield event.image_result(url)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜结束")
