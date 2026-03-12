@@ -245,7 +245,10 @@ class GameSession:
         self.total_heals = 0
         self.map_state = random_map_state()
         self.spawn_wave(self.wave)
-        return f"游戏开始，模式：{self.mode}，地图：{self.map_state.name}，第 1 波敌人已出现！"
+        return (
+            f"游戏开始，模式：{self.mode}，地图：{self.map_state.name}，第 1 波敌人已出现！\n"
+            f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+        )
 
     def spawn_wave(self, wave: int) -> None:
         self.enemies = []
@@ -297,6 +300,61 @@ class GameSession:
         idx = max(0, min(enemy.path_index, len(self.map_state.path) - 1))
         return self.map_state.path[idx]
 
+    def get_buildable_cells(self) -> List[Tuple[int, int]]:
+        if not self.map_state:
+            return []
+
+        cells: List[Tuple[int, int]] = []
+        for row in range(GRID_ROWS):
+            for col in range(GRID_COLS):
+                if self.map_state.is_buildable(row, col):
+                    cells.append((row, col))
+        return cells
+
+    def get_buildable_cells_text(self, limit: int | None = None) -> str:
+        cells = self.get_buildable_cells()
+        if not cells:
+            return "无"
+
+        parts = [f"({r},{c})" for r, c in cells]
+        if limit is not None and len(parts) > limit:
+            shown = "、".join(parts[:limit])
+            return f"{shown} …… 共 {len(parts)} 个"
+        return "、".join(parts)
+
+    def _build_invalid_position_message(self, row: int, col: int) -> str:
+        if not in_bounds(row, col):
+            return (
+                f"坐标 ({row},{col}) 超出地图范围。\n"
+                f"有效范围：行 0~{GRID_ROWS - 1}，列 0~{GRID_COLS - 1}。"
+            )
+
+        if not self.map_state:
+            return "地图未初始化。"
+
+        if (row, col) == self.map_state.start():
+            return (
+                f"坐标 ({row},{col}) 是起点，不能建造。\n"
+                f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+            )
+
+        if (row, col) == self.map_state.end():
+            return (
+                f"坐标 ({row},{col}) 是萝卜终点，不能建造。\n"
+                f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+            )
+
+        if self.map_state.is_path_cell(row, col):
+            return (
+                f"坐标 ({row},{col}) 是敌人路径格，不能建造。\n"
+                f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+            )
+
+        return (
+            f"坐标 ({row},{col}) 不可建造。\n"
+            f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+        )
+
     def build_tower(self, tower_type: str, row: int, col: int) -> Tuple[bool, str]:
         if self.status != "running":
             return False, "当前没有进行中的游戏，请先使用 /萝卜开始"
@@ -305,17 +363,21 @@ class GameSession:
             return False, "未知塔类型，可用：弓箭 / 炮塔 / 冰塔 / 治疗塔"
 
         if not in_bounds(row, col):
-            return False, f"坐标必须在 0~{GRID_ROWS - 1} 行、0~{GRID_COLS - 1} 列之间"
+            return False, self._build_invalid_position_message(row, col)
 
         if not self.map_state:
             return False, "地图未初始化"
 
         if not self.map_state.is_buildable(row, col):
-            return False, "该格子不可建造，不能建在路径/起点/萝卜上"
+            return False, self._build_invalid_position_message(row, col)
 
         key = f"{row},{col}"
         if key in self.towers:
-            return False, "该位置已经有防御塔了"
+            tower = self.towers[key]
+            return False, (
+                f"坐标 ({row},{col}) 已有防御塔：{tower.name} Lv{tower.level}。\n"
+                f"如需处理，可使用：/萝卜升级 {row} {col} 或 /萝卜拆除 {row} {col}"
+            )
 
         cost = TOWER_TEMPLATES[tower_type]["cost"]
         if self.gold < cost:
@@ -329,10 +391,16 @@ class GameSession:
         if self.status != "running":
             return False, "当前没有进行中的游戏"
 
+        if not in_bounds(row, col):
+            return False, f"坐标 ({row},{col}) 超出地图范围，不能升级。"
+
         key = f"{row},{col}"
         tower = self.towers.get(key)
         if not tower:
-            return False, "��位置没有防御塔"
+            return False, (
+                f"坐标 ({row},{col}) 没有防御塔，无法升级。\n"
+                f"可建造格：{self.get_buildable_cells_text(limit=12)}"
+            )
 
         if tower.level >= 5:
             return False, "该防御塔已满级"
@@ -349,10 +417,13 @@ class GameSession:
         if self.status != "running":
             return False, "当前没有进行中的游戏"
 
+        if not in_bounds(row, col):
+            return False, f"坐标 ({row},{col}) 超出地图范围，不能拆除。"
+
         key = f"{row},{col}"
         tower = self.towers.get(key)
         if not tower:
-            return False, "该位置没有防御塔"
+            return False, f"坐标 ({row},{col}) 没有防御塔，无法拆除。"
 
         refund = int((tower.cfg["cost"] + (tower.level - 1) * tower.cfg["upgrade_cost"]) * 0.5)
         self.gold += refund
