@@ -29,7 +29,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.4")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.5")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -41,8 +41,7 @@ class CarrotDefenderPlugin(Star):
 
         self.game_manager.load_sessions(self.storage.load_sessions())
 
-        # 安全渲染模式：image / text
-        # 默认先尝试图片，但永远自动 fallback 到文本
+        # image / text
         self.render_mode = "image"
 
     def _get_session_id(self, event: AstrMessageEvent) -> str:
@@ -252,7 +251,7 @@ class CarrotDefenderPlugin(Star):
 
         if mode_text in ("文本", "text", "txt"):
             self.render_mode = "text"
-            yield event.plain_result("已切换为纯文本模式：不再尝试���片渲染。")
+            yield event.plain_result("已切换为纯文本模式：不再尝试图片渲染。")
             return
 
         yield event.plain_result(
@@ -275,6 +274,18 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             payload = build_status_payload(session, compact=True)
+
+            if self.render_mode == "image":
+                plain_text = self._payload_to_plain_text(payload)
+                plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
+                ok, result = await self._try_text_to_image(plain_text)
+                if ok:
+                    yield event.image_result(result)
+                    return
+                async for result in self._send_text(event, plain_text, body_max_lines=30):
+                    yield result
+                return
+
             async for result in self._send_panel(event, payload, body_max_lines=30):
                 yield result
 
@@ -291,6 +302,18 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             payload = build_status_payload(session, compact=True)
+
+            if self.render_mode == "image":
+                plain_text = self._payload_to_plain_text(payload)
+                plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
+                ok, result = await self._try_text_to_image(plain_text)
+                if ok:
+                    yield event.image_result(result)
+                    return
+                async for result in self._send_text(event, plain_text, body_max_lines=30):
+                    yield result
+                return
+
             async for result in self._send_panel(event, payload, body_max_lines=30):
                 yield result
 
@@ -315,6 +338,20 @@ class CarrotDefenderPlugin(Star):
             return
 
         payload = build_status_payload(session, compact=True)
+
+        if self.render_mode == "image":
+            plain_text = self._payload_to_plain_text(payload)
+            plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
+
+            ok, result = await self._try_text_to_image(plain_text)
+            if ok:
+                yield event.image_result(result)
+                return
+
+            async for chunk in self._send_text(event, plain_text, body_max_lines=30):
+                yield chunk
+            return
+
         async for result in self._send_panel(event, payload, body_max_lines=30):
             yield result
 
@@ -366,11 +403,14 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=True)
                 text = f"【建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+
                 if self.render_mode == "image":
+                    text += "\n\n提示：完整地图请使用：/萝卜状态文本"
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
                         yield event.image_result(result)
                         return
+
                 async for result in self._send_text(event, text, body_max_lines=30):
                     yield result
             else:
@@ -399,12 +439,15 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"【升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【升级��果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+
                 if self.render_mode == "image":
+                    text += "\n\n提示：完整地图请使用：/萝卜状态文本"
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
                         yield event.image_result(result)
                         return
+
                 async for result in self._send_text(event, text, body_max_lines=30):
                     yield result
             else:
@@ -434,11 +477,14 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=True)
                 text = f"【拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+
                 if self.render_mode == "image":
+                    text += "\n\n提示：完整地图请使用：/萝卜状态文本"
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
                         yield event.image_result(result)
                         return
+
                 async for result in self._send_text(event, text, body_max_lines=30):
                     yield result
             else:
@@ -464,11 +510,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=False)
                 text = f"【回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
                         yield event.image_result(result)
                         return
+
                 async for result in self._send_text(event, text, body_max_lines=MAX_STATUS_LINES):
                     yield result
             else:
@@ -494,11 +542,13 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 payload = build_status_payload(session, compact=False)
                 text = f"【波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
                         yield event.image_result(result)
                         return
+
                 async for result in self._send_text(event, text, body_max_lines=MAX_STATUS_LINES):
                     yield result
             else:
