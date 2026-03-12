@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .game import GameSession
+from .game import GameSession, CoopGameSession
 
 
 def _mode_text(mode: str) -> str:
@@ -16,16 +16,20 @@ def _tower_short_name(tower_type: str) -> str:
     }.get(tower_type, "T")
 
 
-def build_path_summary(game: GameSession, max_nodes: int = 10) -> str:
-    if not game.map_state or not game.map_state.path:
+def build_path_summary_from_state(map_state, max_nodes: int = 10) -> str:
+    if not map_state or not map_state.path:
         return "无"
 
-    path = game.map_state.path
+    path = map_state.path
     shown = path[:max_nodes]
     text = " -> ".join(f"({r},{c})" for r, c in shown)
     if len(path) > max_nodes:
         text += f" -> ... 共 {len(path)} 个节点"
     return text
+
+
+def build_path_summary(game: GameSession, max_nodes: int = 10) -> str:
+    return build_path_summary_from_state(game.map_state, max_nodes=max_nodes)
 
 
 def build_enemy_items(game: GameSession) -> list[dict]:
@@ -276,4 +280,173 @@ def build_session_record_payload(game: GameSession) -> dict:
                 ],
             }
         ],
+    }
+
+
+def build_coop_room_payload(room: CoopGameSession) -> dict:
+    items = []
+    for uid, player in room.players.items():
+        host_mark = "（房主）" if uid == room.host_user_id else ""
+        items.append({
+            "main": f"{player.nickname or uid}{host_mark}",
+            "sub": f"金币 {player.gold} ｜ 建造 {player.build_count} ｜ 升级 {player.upgrade_count}",
+        })
+
+    map_name = room.map_state.name if room.map_state else "待开局"
+    return {
+        "title": "合作房间",
+        "subtitle": f"状态：{room.status}",
+        "badge": "Co-op",
+        "sections": [
+            {
+                "title": "房间信息",
+                "kv": [
+                    {"label": "房主", "value": room.host_user_id or "未知"},
+                    {"label": "人数", "value": f"{len(room.players)}/8"},
+                    {"label": "状态", "value": room.status},
+                    {"label": "地图", "value": map_name},
+                ],
+            },
+            {"title": "成员列表", "items": items, "empty_text": "暂无成员"},
+        ],
+    }
+
+
+def build_coop_enemy_items(room: CoopGameSession) -> list[dict]:
+    alive = [e for e in room.enemies if e.alive]
+    alive.sort(key=lambda x: (-x.path_index, x.hp))
+    items = []
+    for enemy in alive:
+        r, c = room.enemy_coord(enemy)
+        sub = f"路径点 {enemy.path_index} ｜ 坐标 ({r},{c}) ｜ 护甲 {enemy.armor} ｜ 速度 {enemy.speed}"
+        if enemy.slow_turns > 0:
+            sub += f" ｜ 减速 {enemy.slow_turns} 回合"
+        items.append({"main": f"{enemy.name} · HP {max(0, enemy.hp)}/{enemy.max_hp}", "sub": sub})
+    return items
+
+
+def build_coop_tower_items(room: CoopGameSession) -> list[dict]:
+    items = []
+    for key in sorted(room.towers.keys()):
+        tower = room.towers[key]
+        owner = room.players.get(tower.owner_user_id)
+        owner_name = owner.nickname or owner.user_id if owner else tower.owner_user_id
+        if tower.kind == "heal":
+            main = f"({tower.row},{tower.col}) {tower.name} Lv{tower.level}"
+            sub = f"所属 {owner_name} ｜ 标记 {_tower_short_name(tower.tower_type)} ｜ 治疗 {tower.heal_amount} ｜ 升级费用 {tower.upgrade_cost}"
+        else:
+            main = f"({tower.row},{tower.col}) {tower.name} Lv{tower.level}"
+            sub = f"所属 {owner_name} ｜ 标记 {_tower_short_name(tower.tower_type)} ｜ ATK {tower.atk} ｜ 射程 {tower.range} ｜ 升级费用 {tower.upgrade_cost}"
+        items.append({"main": main, "sub": sub})
+    return items
+
+
+def build_coop_status_payload(room: CoopGameSession, compact: bool = False) -> dict:
+    alive_count = sum(1 for e in room.enemies if e.alive)
+    front_enemy = None
+    alive = [e for e in room.enemies if e.alive]
+    if alive:
+        alive.sort(key=lambda x: (-x.path_index, x.hp))
+        front_enemy = alive[0]
+
+    player_items = []
+    for uid, player in room.players.items():
+        player_items.append({
+            "main": f"{player.nickname or uid}",
+            "sub": f"金币 {player.gold} ｜ 击杀 {player.kills_contributed} ｜ 治疗 {player.heal_contributed}",
+        })
+
+    map_name = room.map_state.name if room.map_state else "未知"
+    start = str(room.map_state.start()) if room.map_state else "-"
+    end = str(room.map_state.end()) if room.map_state else "-"
+    path_length = len(room.map_state.path) if room.map_state else 0
+    path_summary = build_path_summary_from_state(room.map_state, max_nodes=10)
+    buildable_summary = room.get_buildable_cells_text(limit=12)
+
+    stats = [
+        {"label": "模式", "value": "合作模式"},
+        {"label": "地图", "value": map_name},
+        {"label": "波次 / 回合", "value": f"{room.wave} / {room.turn}"},
+        {"label": "生命", "value": f"{room.carrot_hp}/{room.max_carrot_hp}"},
+        {"label": "人数", "value": f"{len(room.players)}/8"},
+    ]
+
+    if compact:
+        return {
+            "title": "合作保卫萝卜 · 随机路径速览",
+            "subtitle": f"状态：{room.status}",
+            "badge": "Co-op",
+            "stats": stats,
+            "sections": [
+                {
+                    "title": "地图摘要",
+                    "kv": [
+                        {"label": "地图名", "value": map_name},
+                        {"label": "起点", "value": start},
+                        {"label": "终点", "value": end},
+                        {"label": "路径长度", "value": path_length},
+                        {"label": "路径摘要", "value": path_summary},
+                        {"label": "可建造格", "value": buildable_summary},
+                    ],
+                },
+                {
+                    "title": "战况速览",
+                    "kv": [
+                        {"label": "敌人剩余", "value": str(alive_count)},
+                        {
+                            "label": "最前敌人",
+                            "value": f"{front_enemy.name} @ {room.enemy_coord(front_enemy)}" if front_enemy else "当前无敌人",
+                        },
+                        {"label": "累计击杀", "value": str(room.total_kills)},
+                        {"label": "累计治疗", "value": str(room.total_heals)},
+                    ],
+                },
+                {"title": "玩家金币", "items": player_items, "empty_text": "暂无玩家"},
+            ],
+        }
+
+    return {
+        "title": "合作保卫萝卜 · 随机路径状态面板",
+        "subtitle": f"状态：{room.status} ｜ 地图：{map_name} ｜ 累计击杀 {room.total_kills}",
+        "badge": "Co-op",
+        "stats": stats + [
+            {"label": "总赏金", "value": str(room.total_gold_earned)},
+            {"label": "存活敌人", "value": str(alive_count)},
+            {"label": "房主", "value": room.host_user_id or "未知"},
+            {"label": "更新时间", "value": room.updated_at or "-"},
+        ],
+        "sections": [
+            {
+                "title": "地图摘要",
+                "kv": [
+                    {"label": "地图名", "value": map_name},
+                    {"label": "起点", "value": start},
+                    {"label": "终点", "value": end},
+                    {"label": "路径长度", "value": path_length},
+                    {"label": "路径摘要", "value": path_summary},
+                    {"label": "可建造格", "value": buildable_summary},
+                ],
+            },
+            {"title": "玩家金币", "items": player_items, "empty_text": "暂无玩家"},
+            {"title": "敌人列表", "items": build_coop_enemy_items(room), "empty_text": "当前没有敌人"},
+            {"title": "防御塔", "items": build_coop_tower_items(room), "empty_text": "当前没有防御塔"},
+        ],
+    }
+
+
+def build_coop_contribution_payload(room: CoopGameSession) -> dict:
+    rows = room.get_contribution_rankings()
+    items = []
+    for idx, row in enumerate(rows, start=1):
+        name = row["nickname"] or row["user_id"]
+        items.append({
+            "no": idx,
+            "main": name,
+            "sub": f"击杀 {row['kills_contributed']} ｜ 治疗 {row['heal_contributed']} ｜ 建造 {row['build_count']} ｜ 升级 {row['upgrade_count']} ｜ 花费 {row['gold_spent']} ｜ 赏金 {row['gold_earned']} ｜ 当前金币 {row['gold']}",
+        })
+    return {
+        "title": "合作贡献榜",
+        "subtitle": f"当前人数：{len(room.players)}",
+        "badge": "Co-op",
+        "sections": [{"title": "贡献排行", "items": items, "empty_text": "暂无贡献数据"}],
     }
