@@ -43,7 +43,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.8.0")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.8.1")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -59,7 +59,8 @@ class CarrotDefenderPlugin(Star):
         self.coop_game_manager.load_sessions(self.storage.load_coop_sessions())
         self.pvp_game_manager.load_sessions(self.storage.load_pvp_sessions())
 
-        self.render_mode = "image"
+        # 止血：默认只走文本，用户手动切图片
+        self.render_mode = "text"
 
     def _get_session_id(self, event: AstrMessageEvent) -> str:
         try:
@@ -221,14 +222,14 @@ class CarrotDefenderPlugin(Star):
         stats = payload.get("stats", [])
         if stats:
             lines.append("")
-            lines.append("")
+            lines.append("【概览】")
             for item in stats:
                 lines.append(f"{item.get('label', '')}：{item.get('value', '')}")
 
         sections = payload.get("sections", [])
         for sec in sections:
             lines.append("")
-            lines.append(f"")
+            lines.append(f"【{sec.get('title', '')}】")
 
             text_block = sec.get("text_block")
             if text_block:
@@ -278,6 +279,13 @@ class CarrotDefenderPlugin(Star):
         for chunk in self._chunks(text, body_max_lines=body_max_lines):
             yield event.plain_result(chunk)
 
+    async def _send_start_text_only(self, event: AstrMessageEvent, payload: dict, tip: str | None = None, body_max_lines: int | None = None):
+        text = self._payload_to_plain_text(payload)
+        if tip:
+            text += f"\n\n{tip}"
+        async for chunk in self._send_text(event, text, body_max_lines=body_max_lines):
+            yield chunk
+
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
     async def carrot_help(self, event: AstrMessageEvent):
@@ -292,7 +300,7 @@ class CarrotDefenderPlugin(Star):
 
         if mode_text in ("图片", "image", "img", "图"):
             self.render_mode = "image"
-            yield event.plain_result("已切换为图片优先模式：先尝试 text_to_image，失败自动回退文本。")
+            yield event.plain_result("已切换为图片优先模式：状态类命令会尝试 text_to_image，失败自动回退文本；开局类命令仍强制文本。")
             return
 
         if mode_text in ("文本", "text", "txt"):
@@ -322,19 +330,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             payload = build_status_payload(session, compact=True)
-
-            if self.render_mode == "image":
-                plain_text = self._payload_to_plain_text(payload)
-                plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
-                ok, result = await self._try_text_to_image(plain_text)
-                if ok:
-                    yield event.image_result(result)
-                    return
-                async for result in self._send_text(event, plain_text, body_max_lines=30):
-                    yield result
-                return
-
-            async for result in self._send_panel(event, payload, body_max_lines=30):
+            async for result in self._send_start_text_only(
+                event,
+                payload,
+                tip="提示：完整地图请使用：/萝卜状态文本",
+                body_max_lines=30,
+            ):
                 yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -350,19 +351,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             payload = build_status_payload(session, compact=True)
-
-            if self.render_mode == "image":
-                plain_text = self._payload_to_plain_text(payload)
-                plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
-                ok, result = await self._try_text_to_image(plain_text)
-                if ok:
-                    yield event.image_result(result)
-                    return
-                async for result in self._send_text(event, plain_text, body_max_lines=30):
-                    yield result
-                return
-
-            async for result in self._send_panel(event, payload, body_max_lines=30):
+            async for result in self._send_start_text_only(
+                event,
+                payload,
+                tip="提示：完整地图请使用：/萝卜状态文本",
+                body_max_lines=30,
+            ):
                 yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
@@ -390,6 +384,7 @@ class CarrotDefenderPlugin(Star):
         if self.render_mode == "image":
             plain_text = self._payload_to_plain_text(payload)
             plain_text += "\n\n提示：完整地图请使用：/萝卜状态文本"
+
             ok, result = await self._try_text_to_image(plain_text)
             if ok:
                 yield event.image_result(result)
@@ -418,7 +413,7 @@ class CarrotDefenderPlugin(Star):
     async def carrot_status_quick_text(self, event: AstrMessageEvent):
         session = self.game_manager.get_session(self._get_session_id(event))
         if not session:
-            yield event.plain_result("当前没有进行中的��戏，请先使用 /萝卜开始")
+            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
             return
 
         async for result in self._send_text(event, render_status_compact(session), body_max_lines=30):
@@ -449,7 +444,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜状态文本"
@@ -486,7 +481,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜状态文本"
@@ -523,7 +518,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜状态文本"
@@ -556,7 +551,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=False)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
@@ -588,7 +583,7 @@ class CarrotDefenderPlugin(Star):
 
             if ok:
                 payload = build_status_payload(session, compact=False)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
 
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
@@ -800,17 +795,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                if self.render_mode == "image":
-                    plain_text = self._payload_to_plain_text(payload)
-                    plain_text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
-                    ok_img, result = await self._try_text_to_image(plain_text)
-                    if ok_img:
-                        yield event.image_result(result)
-                        return
-                    async for result in self._send_text(event, plain_text, body_max_lines=35):
-                        yield result
-                    return
-                async for result in self._send_panel(event, payload, body_max_lines=35):
+                async for result in self._send_start_text_only(
+                    event,
+                    payload,
+                    tip="提示：完整共享地图请使用：/萝卜合作状态文本",
+                    body_max_lines=35,
+                ):
                     yield result
             else:
                 yield event.plain_result(msg)
@@ -891,7 +881,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【合作建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -924,7 +914,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【合作升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -957,7 +947,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【合作拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -986,7 +976,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=False)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【合作回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
@@ -1014,7 +1004,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_coop_status_payload(room, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【合作波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整共享地图请使用：/萝卜合作状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -1138,7 +1128,7 @@ class CarrotDefenderPlugin(Star):
                 yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
-    @filter.command("萝卜PVP房���")
+    @filter.command("萝卜PVP房间")
     async def carrot_pvp_room(self, event: AstrMessageEvent):
         room = self.pvp_game_manager.get_session(self._get_session_id(event))
         if not room:
@@ -1175,17 +1165,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_pvp_status_payload(room)
-                if self.render_mode == "image":
-                    plain_text = self._payload_to_plain_text(payload)
-                    plain_text += "\n\n提示：查看个人完整地图请使用：/萝卜PVP我的状态文本"
-                    ok_img, result = await self._try_text_to_image(plain_text)
-                    if ok_img:
-                        yield event.image_result(result)
-                        return
-                    async for result in self._send_text(event, plain_text, body_max_lines=35):
-                        yield result
-                    return
-                async for result in self._send_panel(event, payload, body_max_lines=35):
+                async for result in self._send_start_text_only(
+                    event,
+                    payload,
+                    tip="提示：查看个人完整地图请使用：/萝卜PVP我的状态文本",
+                    body_max_lines=35,
+                ):
                     yield result
             else:
                 yield event.plain_result(msg)
@@ -1296,7 +1281,7 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 player = room.get_player_state(uid)
                 payload = build_pvp_my_state_payload(room, player, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【PVP 建造结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -1330,7 +1315,7 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 player = room.get_player_state(uid)
                 payload = build_pvp_my_state_payload(room, player, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【PVP 升级结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -1364,7 +1349,7 @@ class CarrotDefenderPlugin(Star):
             if ok:
                 player = room.get_player_state(uid)
                 payload = build_pvp_my_state_payload(room, player, compact=True)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【PVP 拆除结果】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     text += "\n\n提示：完整地图请使用：/萝卜PVP我的状态文本"
                     ok_img, result = await self._try_text_to_image(text)
@@ -1393,7 +1378,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_pvp_status_payload(room)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【PVP 回合结算】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
@@ -1421,7 +1406,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             if ok:
                 payload = build_pvp_status_payload(room)
-                text = f"\n{msg}\n\n{self._payload_to_plain_text(payload)}"
+                text = f"【PVP 波次推进】\n{msg}\n\n{self._payload_to_plain_text(payload)}"
                 if self.render_mode == "image":
                     ok_img, result = await self._try_text_to_image(text)
                     if ok_img:
