@@ -25,9 +25,18 @@ from .render import (
 )
 from .storage import JsonStorage
 from .utils import smart_compose, MAX_LOG_LINES, MAX_RANK_LINES, MAX_STATUS_LINES
+from .image_render import (
+    build_status_payload,
+    build_rank_payload,
+    build_player_stats_payload,
+    build_session_record_payload,
+    build_coop_room_payload,
+    build_coop_status_payload,
+    build_coop_contribution_payload,
+)
 
 
-@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.4.0")
+@register("carrot_defender", "sakikosunchaser", "QQ文字版保卫萝卜小游戏", "0.4.1")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -168,13 +177,96 @@ class CarrotDefenderPlugin(Star):
             "可用塔类型：弓箭 / 炮塔 / 冰塔 / 治疗塔"
         )
 
+    def _payload_to_plain_text(self, payload: dict) -> str:
+        lines = []
+
+        title = payload.get("title", "")
+        subtitle = payload.get("subtitle", "")
+        badge = payload.get("badge", "")
+
+        if title:
+            lines.append(str(title))
+        if subtitle:
+            lines.append(str(subtitle))
+        if badge:
+            lines.append(f"标签：{badge}")
+
+        stats = payload.get("stats", [])
+        if stats:
+            lines.append("")
+            lines.append("【概览】")
+            for item in stats:
+                lines.append(f"{item.get('label', '')}：{item.get('value', '')}")
+
+        map_nodes = payload.get("map_nodes", [])
+        if map_nodes:
+            lines.append("")
+            lines.append("【地图】")
+            lines.append(" -> ".join(str(x.get("text", "")) for x in map_nodes))
+
+        two_col = payload.get("two_col", [])
+        for col in two_col:
+            lines.append("")
+            lines.append(f"【{col.get('title', '')}】")
+            items = col.get("items", [])
+            if items:
+                for item in items:
+                    main = str(item.get("main", ""))
+                    sub = str(item.get("sub", ""))
+                    lines.append(f"- {main}")
+                    if sub:
+                        lines.append(f"  {sub}")
+            else:
+                lines.append(col.get("empty_text", "暂无内容"))
+
+        sections = payload.get("sections", [])
+        for sec in sections:
+            lines.append("")
+            lines.append(f"【{sec.get('title', '')}】")
+
+            kv = sec.get("kv", [])
+            if kv:
+                for row in kv:
+                    lines.append(f"{row.get('label', '')}：{row.get('value', '')}")
+                continue
+
+            items = sec.get("items", [])
+            if items:
+                for item in items:
+                    prefix = f"{item.get('no')}. " if item.get("no") else "- "
+                    main = str(item.get("main", ""))
+                    sub = str(item.get("sub", ""))
+                    lines.append(prefix + main)
+                    if sub:
+                        lines.append(f"  {sub}")
+            else:
+                lines.append(sec.get("empty_text", "暂无内容"))
+
+        return "\n".join(lines).strip()
+
+    async def _render_panel_image(self, payload: dict) -> tuple[str, str]:
+        plain_text = self._payload_to_plain_text(payload)
+        try:
+            url = await self.text_to_image(plain_text)
+            return "image", url
+        except Exception:
+            return "text", plain_text
+
+    async def _send_panel(self, event: AstrMessageEvent, payload: dict, body_max_lines: int | None = None):
+        result_type, result_value = await self._render_panel_image(payload)
+        if result_type == "image":
+            yield event.image_result(result_value)
+        else:
+            for chunk in self._chunks(result_value, body_max_lines=body_max_lines):
+                yield event.plain_result(chunk)
+
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜帮助")
     async def carrot_help(self, event: AstrMessageEvent):
         for chunk in self._chunks(render_help(), body_max_lines=40):
             yield event.plain_result(chunk)
 
-    # ---------------- 单人模式 ----------------
+    # ---------------- 单人模式：图片优先 ----------------
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜开始")
@@ -188,8 +280,9 @@ class CarrotDefenderPlugin(Star):
             self._touch_single_session(session_id)
             self._save_sessions()
 
-            for chunk in self._chunks(render_status_compact(session), body_max_lines=20):
-                yield event.plain_result(chunk)
+            payload = build_status_payload(session, compact=True)
+            async for result in self._send_panel(event, payload, body_max_lines=20):
+                yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜无尽")
@@ -203,8 +296,9 @@ class CarrotDefenderPlugin(Star):
             self._touch_single_session(session_id)
             self._save_sessions()
 
-            for chunk in self._chunks(render_status_compact(session), body_max_lines=20):
-                yield event.plain_result(chunk)
+            payload = build_status_payload(session, compact=True)
+            async for result in self._send_panel(event, payload, body_max_lines=20):
+                yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜状态")
@@ -213,9 +307,9 @@ class CarrotDefenderPlugin(Star):
         if not session:
             yield event.plain_result("当前没有进行中的单人游戏，请先使用 /萝卜开始")
             return
-
-        for chunk in self._chunks(render_status(session), body_max_lines=MAX_STATUS_LINES):
-            yield event.plain_result(chunk)
+        payload = build_status_payload(session, compact=False)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜速览")
@@ -224,7 +318,27 @@ class CarrotDefenderPlugin(Star):
         if not session:
             yield event.plain_result("当前没有进行中的单人游戏，请先使用 /萝卜开始")
             return
+        payload = build_status_payload(session, compact=True)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
 
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜状态文本")
+    async def carrot_status_text(self, event: AstrMessageEvent):
+        session = self.game_manager.get_session(self._get_session_id(event))
+        if not session:
+            yield event.plain_result("当前没有进行中的单人游戏，请先使用 /萝卜开始")
+            return
+        for chunk in self._chunks(render_status(session), body_max_lines=MAX_STATUS_LINES):
+            yield event.plain_result(chunk)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜速览文本")
+    async def carrot_status_quick_text(self, event: AstrMessageEvent):
+        session = self.game_manager.get_session(self._get_session_id(event))
+        if not session:
+            yield event.plain_result("当前没有进行中的单人游戏，请先使用 /萝卜开始")
+            return
         for chunk in self._chunks(render_status_compact(session), body_max_lines=20):
             yield event.plain_result(chunk)
 
@@ -233,7 +347,6 @@ class CarrotDefenderPlugin(Star):
     async def carrot_build(self, event: AstrMessageEvent, tower_type=None, position=None):
         session_id = self._get_session_id(event)
         lock = self._get_lock(session_id)
-
         tower_type = self._normalize_tower_type(tower_type)
         pos = self._parse_position(position)
 
@@ -252,18 +365,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【建造结果】",
-                    body=msg,
-                    footer="【当前速览】\n" + render_status_compact(session),
-                    body_max_lines=12,
-                    limit=1200,
-                )
+                payload = build_status_payload(session, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=20):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                for chunk in self._chunks(msg, body_max_lines=10):
+                    yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜升级")
@@ -287,18 +394,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【升级结果】",
-                    body=msg,
-                    footer="【当前速览】\n" + render_status_compact(session),
-                    body_max_lines=12,
-                    limit=1200,
-                )
+                payload = build_status_payload(session, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=20):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                for chunk in self._chunks(msg, body_max_lines=10):
+                    yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜拆除")
@@ -322,18 +423,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【拆除结果】",
-                    body=msg,
-                    footer="【当前速览】\n" + render_status_compact(session),
-                    body_max_lines=12,
-                    limit=1200,
-                )
+                payload = build_status_payload(session, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=20):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                for chunk in self._chunks(msg, body_max_lines=10):
+                    yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜下一回合")
@@ -353,18 +448,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【回合结算】",
-                    body=msg,
-                    footer="【当前速览】\n" + render_status_compact(session),
-                    body_max_lines=MAX_LOG_LINES,
-                    limit=1200,
-                )
+                payload = build_status_payload(session, compact=False)
+                async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=12)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                for chunk in self._chunks(msg, body_max_lines=12):
+                    yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜下一波")
@@ -384,18 +473,12 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【波次推进】",
-                    body=msg,
-                    footer="【当前速览】\n" + render_status_compact(session),
-                    body_max_lines=12,
-                    limit=1200,
-                )
+                payload = build_status_payload(session, compact=False)
+                async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=12)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                for chunk in self._chunks(msg, body_max_lines=12):
+                    yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜记录")
@@ -404,13 +487,31 @@ class CarrotDefenderPlugin(Star):
         if not session:
             yield event.plain_result("当前会话没有进行中的单人游戏记录")
             return
+        payload = build_session_record_payload(session)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
 
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜记录文本")
+    async def carrot_record_text(self, event: AstrMessageEvent):
+        session = self.game_manager.get_session(self._get_session_id(event))
+        if not session:
+            yield event.plain_result("当前会话没有进行中的单人游戏记录")
+            return
         for chunk in self._chunks(render_session_record(session), body_max_lines=20):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜排行")
     async def carrot_rank(self, event: AstrMessageEvent):
+        rankings = self.storage.get_player_rankings()
+        payload = build_rank_payload("玩家排行榜", rankings, kind="player")
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_RANK_LINES):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜排行文本")
+    async def carrot_rank_text(self, event: AstrMessageEvent):
         rankings = self.storage.get_player_rankings()
         for chunk in self._chunks(render_player_rankings(rankings), body_max_lines=MAX_RANK_LINES):
             yield event.plain_result(chunk)
@@ -419,6 +520,14 @@ class CarrotDefenderPlugin(Star):
     @filter.command("萝卜无尽排行")
     async def carrot_endless_rank(self, event: AstrMessageEvent):
         rankings = self.storage.get_endless_rankings()
+        payload = build_rank_payload("无尽排行榜", rankings, kind="endless")
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_RANK_LINES):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜无尽排行文本")
+    async def carrot_endless_rank_text(self, event: AstrMessageEvent):
+        rankings = self.storage.get_endless_rankings()
         for chunk in self._chunks(render_endless_rankings(rankings), body_max_lines=MAX_RANK_LINES):
             yield event.plain_result(chunk)
 
@@ -426,12 +535,34 @@ class CarrotDefenderPlugin(Star):
     @filter.command("萝卜群排行")
     async def carrot_room_rank(self, event: AstrMessageEvent):
         rankings = self.storage.get_room_rankings()
+        payload = build_rank_payload("群排行榜", rankings, kind="room")
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_RANK_LINES):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜群排行文本")
+    async def carrot_room_rank_text(self, event: AstrMessageEvent):
+        rankings = self.storage.get_room_rankings()
         for chunk in self._chunks(render_room_rankings(rankings), body_max_lines=MAX_RANK_LINES):
             yield event.plain_result(chunk)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜我的战绩")
     async def carrot_my_stats(self, event: AstrMessageEvent):
+        user_id = self._get_user_id(event)
+        stats = self.storage.get_player_stats(user_id)
+        stats = dict(stats) if stats else {}
+        if stats:
+            games = int(stats.get("games", 0))
+            wins = int(stats.get("wins", 0))
+            stats["win_rate"] = round((wins / games * 100), 2) if games > 0 else 0.0
+        payload = build_player_stats_payload(user_id, stats)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜我的战绩文本")
+    async def carrot_my_stats_text(self, event: AstrMessageEvent):
         user_id = self._get_user_id(event)
         stats = self.storage.get_player_stats(user_id)
         for chunk in self._chunks(render_player_stats(user_id, stats), body_max_lines=20):
@@ -465,7 +596,7 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
             yield event.plain_result("当前单人游戏已结束，并已记录本局战绩")
 
-    # ---------------- 合作模式 ----------------
+    # ---------------- 合作模式：图片优先 ----------------
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作创建")
@@ -476,7 +607,7 @@ class CarrotDefenderPlugin(Star):
         lock = self._get_lock(session_id)
 
         async with lock:
-            ok, msg, room = self.coop_game_manager.create_room(session_id, user_id, nickname=nickname)
+            ok, msg, room = self.coop_game_manager.create_room(session_id, host_user_id=user_id, nickname=nickname)
             self._touch_coop_session(session_id)
             self._save_sessions()
 
@@ -484,15 +615,9 @@ class CarrotDefenderPlugin(Star):
                 yield event.plain_result(msg)
                 return
 
-            chunks = smart_compose(
-                header="【合作房间创建成功】",
-                body=msg,
-                footer=render_coop_room(room),
-                body_max_lines=20,
-                limit=1200,
-            )
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+            payload = build_coop_room_payload(room)
+            async for result in self._send_panel(event, payload, body_max_lines=20):
+                yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作加入")
@@ -513,18 +638,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【加入合作房间】",
-                    body=msg,
-                    footer=render_coop_room(room),
-                    body_max_lines=20,
-                    limit=1200,
-                )
+                payload = build_coop_room_payload(room)
+                async for result in self._send_panel(event, payload, body_max_lines=20):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作退出")
@@ -551,18 +669,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【退出合作房间】",
-                    body=msg,
-                    footer=render_coop_room(room),
-                    body_max_lines=20,
-                    limit=1200,
-                )
+                payload = build_coop_room_payload(room)
+                async for result in self._send_panel(event, payload, body_max_lines=20):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作房间")
@@ -571,7 +682,17 @@ class CarrotDefenderPlugin(Star):
         if not room:
             yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
             return
+        payload = build_coop_room_payload(room)
+        async for result in self._send_panel(event, payload, body_max_lines=20):
+            yield result
 
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜合作房间文本")
+    async def carrot_coop_room_text(self, event: AstrMessageEvent):
+        room = self.coop_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
+            return
         for chunk in self._chunks(render_coop_room(room), body_max_lines=20):
             yield event.plain_result(chunk)
 
@@ -593,18 +714,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【合作游戏开始】",
-                    body=msg,
-                    footer=render_coop_status_compact(room),
-                    body_max_lines=25,
-                    limit=1200,
-                )
+                payload = build_coop_status_payload(room, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作结束")
@@ -634,9 +748,9 @@ class CarrotDefenderPlugin(Star):
         if not room:
             yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
             return
-
-        for chunk in self._chunks(render_coop_status(room), body_max_lines=MAX_STATUS_LINES):
-            yield event.plain_result(chunk)
+        payload = build_coop_status_payload(room, compact=False)
+        async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+            yield result
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作速览")
@@ -645,7 +759,27 @@ class CarrotDefenderPlugin(Star):
         if not room:
             yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
             return
+        payload = build_coop_status_payload(room, compact=True)
+        async for result in self._send_panel(event, payload, body_max_lines=25):
+            yield result
 
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜合作状态文本")
+    async def carrot_coop_status_text(self, event: AstrMessageEvent):
+        room = self.coop_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
+            return
+        for chunk in self._chunks(render_coop_status(room), body_max_lines=MAX_STATUS_LINES):
+            yield event.plain_result(chunk)
+
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜合作速览文本")
+    async def carrot_coop_quick_text(self, event: AstrMessageEvent):
+        room = self.coop_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
+            return
         for chunk in self._chunks(render_coop_status_compact(room), body_max_lines=25):
             yield event.plain_result(chunk)
 
@@ -674,18 +808,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【合作建造结果】",
-                    body=msg,
-                    footer="【当前合作速览】\n" + render_coop_status_compact(room),
-                    body_max_lines=25,
-                    limit=1200,
-                )
+                payload = build_coop_status_payload(room, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作升级")
@@ -710,18 +837,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【合作升级结果】",
-                    body=msg,
-                    footer="【当前合作速览】\n" + render_coop_status_compact(room),
-                    body_max_lines=25,
-                    limit=1200,
-                )
+                payload = build_coop_status_payload(room, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作拆除")
@@ -746,18 +866,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【合作拆除结果】",
-                    body=msg,
-                    footer="【当前合作速览】\n" + render_coop_status_compact(room),
-                    body_max_lines=25,
-                    limit=1200,
-                )
+                payload = build_coop_status_payload(room, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=10)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作下一回合")
@@ -777,18 +890,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【合作回合结算】",
-                    body=msg,
-                    footer="【当前合作速览】\n" + render_coop_status_compact(room),
-                    body_max_lines=MAX_LOG_LINES + 8,
-                    limit=1200,
-                )
+                payload = build_coop_status_payload(room, compact=False)
+                async for result in self._send_panel(event, payload, body_max_lines=MAX_STATUS_LINES):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=12)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作下一波")
@@ -808,18 +914,11 @@ class CarrotDefenderPlugin(Star):
             self._save_sessions()
 
             if ok:
-                chunks = smart_compose(
-                    header="【合作波次推进】",
-                    body=msg,
-                    footer="【当前合作速览】\n" + render_coop_status_compact(room),
-                    body_max_lines=25,
-                    limit=1200,
-                )
+                payload = build_coop_status_payload(room, compact=True)
+                async for result in self._send_panel(event, payload, body_max_lines=25):
+                    yield result
             else:
-                chunks = self._chunks(msg, body_max_lines=12)
-
-            for chunk in chunks:
-                yield event.plain_result(chunk)
+                yield event.plain_result(msg)
 
     @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
     @filter.command("萝卜合作贡献")
@@ -828,6 +927,16 @@ class CarrotDefenderPlugin(Star):
         if not room:
             yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
             return
+        payload = build_coop_contribution_payload(room)
+        async for result in self._send_panel(event, payload, body_max_lines=25):
+            yield result
 
+    @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP)
+    @filter.command("萝卜合作贡献文本")
+    async def carrot_coop_contribution_text(self, event: AstrMessageEvent):
+        room = self.coop_game_manager.get_session(self._get_session_id(event))
+        if not room:
+            yield event.plain_result("当前没有合作房间，请先使用 /萝卜合作创建")
+            return
         for chunk in self._chunks(render_coop_contributions(room), body_max_lines=25):
             yield event.plain_result(chunk)
