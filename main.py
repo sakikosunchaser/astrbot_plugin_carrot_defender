@@ -29,7 +29,7 @@ from .image_render import (
 )
 
 
-@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.0")
+@register("carrot_defender", "sakikosunchaser", "随机路径版保卫萝卜文字小游戏", "0.6.1")
 class CarrotDefenderPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -197,6 +197,7 @@ class CarrotDefenderPlugin(Star):
 
     async def _render_panel_image(self, payload: dict) -> tuple[str, str]:
         plain_text = self._payload_to_plain_text(payload)
+
         try:
             url = await self.text_to_image(plain_text)
             return "image", url
@@ -254,7 +255,7 @@ class CarrotDefenderPlugin(Star):
     async def carrot_status(self, event: AstrMessageEvent):
         session = self.game_manager.get_session(self._get_session_id(event))
         if not session:
-            yield event.plain_result("当前没有进行中的游戏，请先使用 /萝卜开始")
+            yield event.plain_result("当前没��进行中的游戏，请先使用 /萝卜开始")
             return
 
         payload = build_status_payload(session, compact=False)
